@@ -39,6 +39,7 @@ export class DuplicateCodeError extends Error {
 export interface LinkStore {
   create_link(input: CreateShortLinkInput): Promise<ShortLink>;
   get_link(code: string): Promise<ShortLink | null>;
+  update_url(code: string, destination_url: string, metadata: LinkMetadata | undefined, now: Date): Promise<ShortLink | null>;
   disable_link(code: string, now: Date): Promise<boolean>;
   record_visit(code: string, now: Date): Promise<void>;
 }

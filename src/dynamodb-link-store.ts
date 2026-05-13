@@ -8,6 +8,7 @@ import {
 import {
   DuplicateCodeError,
   type CreateShortLinkInput,
+  type LinkMetadata,
   type LinkStore,
   type ShortLink,
 } from './link-store.js';
@@ -64,6 +65,42 @@ export class DynamoDbLinkStore implements LinkStore {
     }));
 
     return result.Item ? (result.Item as ShortLink) : null;
+  }
+
+  async update_url(
+    code: string,
+    destination_url: string,
+    metadata: LinkMetadata | undefined,
+    now: Date,
+  ): Promise<ShortLink | null> {
+    try {
+      const result = await this.client.send(new UpdateCommand({
+        TableName: this.table_name,
+        Key: { code },
+        UpdateExpression: metadata
+          ? 'set destination_url = :destination_url, #metadata = :metadata, updated_at = :updated_at'
+          : 'set destination_url = :destination_url, updated_at = :updated_at remove #metadata',
+        ConditionExpression: 'attribute_exists(#code)',
+        ExpressionAttributeNames: {
+          '#code': 'code',
+          '#metadata': 'metadata',
+        },
+        ExpressionAttributeValues: {
+          ':destination_url': destination_url,
+          ...(metadata ? { ':metadata': metadata } : {}),
+          ':updated_at': now.toISOString(),
+        },
+        ReturnValues: 'ALL_NEW',
+      }));
+
+      return result.Attributes ? (result.Attributes as ShortLink) : null;
+    } catch (error) {
+      if (is_conditional_check_failed(error)) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   async disable_link(code: string, now: Date): Promise<boolean> {

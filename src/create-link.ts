@@ -155,7 +155,7 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
   };
 }
 
-async function fetch_metadata_safely(
+export async function fetch_metadata_safely(
   metadata_fetcher: MetadataFetcher,
   destination_url: string,
   now: Date,

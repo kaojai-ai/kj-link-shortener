@@ -3,13 +3,14 @@ import type {
   APIGatewayProxyStructuredResultV2,
 } from 'aws-lambda';
 import { load_runtime_config } from './config.js';
-import { create_short_link, type CreateLinkRequest } from './create-link.js';
+import { create_short_link, fetch_metadata_safely, type CreateLinkRequest } from './create-link.js';
 import { DynamoDbLinkStore } from './dynamodb-link-store.js';
 import { html_response, json_response, not_found_response, redirect_response } from './http.js';
 import { is_link_active, type LinkStore } from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import { is_preview_crawler, render_preview_html } from './preview-html.js';
 import { is_reserved_code } from './short-code.js';
+import { normalize_destination_url, validate_destination_url } from './url.js';
 
 type Runtime = {
   store: LinkStore;
@@ -102,6 +103,28 @@ async function handle_api_request(
     return json_response(200, link);
   }
 
+  if (link_path_match && method === 'PATCH') {
+    const parsed_body = parse_json_body(event.body);
+
+    if (!parsed_body.ok) {
+      return json_response(400, { error: parsed_body.message });
+    }
+
+    const update_result = await update_link_url(
+      link_store,
+      decodeURIComponent(link_path_match[1] ?? ''),
+      parsed_body.body,
+      new Date(),
+      metadata_fetcher,
+    );
+
+    if (!update_result.ok) {
+      return json_response(update_result.status_code, { error: update_result.message });
+    }
+
+    return json_response(200, update_result.link);
+  }
+
   if (link_path_match && method === 'DELETE') {
     const disabled = await link_store.disable_link(decodeURIComponent(link_path_match[1] ?? ''), new Date());
     return disabled ? json_response(200, { ok: true }) : not_found_response();
@@ -158,6 +181,40 @@ function get_header(event: APIGatewayProxyEventV2, name: string): string | undef
   const lower_name = name.toLowerCase();
   const header_entry = Object.entries(event.headers).find(([key]) => key.toLowerCase() === lower_name);
   return header_entry?.[1];
+}
+
+async function update_link_url(
+  link_store: LinkStore,
+  code: string,
+  body: unknown,
+  now: Date,
+  metadata_fetcher: MetadataFetcher,
+): Promise<
+  | { ok: true; link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>> }
+  | { ok: false; status_code: 400 | 404; message: string }
+> {
+  if (!is_record(body) || !Object.hasOwn(body, 'url')) {
+    return { ok: false, status_code: 400, message: 'url is required' };
+  }
+
+  if (typeof body.url !== 'string') {
+    return { ok: false, status_code: 400, message: 'url must be a string' };
+  }
+
+  const destination_url = normalize_destination_url(body.url);
+  const url_error = validate_destination_url(destination_url);
+
+  if (url_error) {
+    return { ok: false, status_code: 400, message: url_error };
+  }
+
+  const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
+  const link = await link_store.update_url(code, destination_url, metadata, now);
+  return link ? { ok: true, link } : { ok: false, status_code: 404, message: 'Not found' };
+}
+
+function is_record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parse_json_body(body: string | undefined): { ok: true; body: unknown } | { ok: false; message: string } {

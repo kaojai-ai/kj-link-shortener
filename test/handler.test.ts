@@ -155,6 +155,54 @@ describe('handler', () => {
     expect(response.body).toContain('<meta property="og:image" content="https://example.org/og.png">');
     expect(link?.visit_count).toBe(0);
   });
+
+  it('updates the destination URL through the private API', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata,
+    );
+
+    const update_response = await handle_request(
+      event({
+        method: 'PATCH',
+        path: '/api/links/docs',
+        api_key: API_KEY,
+        body: {
+          url: 'https://example.org/new-docs',
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      async () => ({
+        title: 'New docs',
+        fetched_at: '2026-05-13T01:00:00.000Z',
+      }),
+    );
+
+    expect(update_response.statusCode).toBe(200);
+    expect(JSON.parse(update_response.body ?? '{}')).toMatchObject({
+      destination_url: 'https://example.org/new-docs',
+      metadata: {
+        title: 'New docs',
+        fetched_at: '2026-05-13T01:00:00.000Z',
+      },
+    });
+
+    const redirect_response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30, no_metadata);
+
+    expect(redirect_response.statusCode).toBe(302);
+    expect(redirect_response.headers?.location).toBe('https://example.org/new-docs');
+  });
 });
 
 function event(input: {

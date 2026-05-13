@@ -1,6 +1,7 @@
 import {
   DuplicateCodeError,
   type CreateShortLinkInput,
+  type LinkMetadata,
   type LinkStore,
   type ShortLink,
 } from '../src/link-store.js';
@@ -32,6 +33,33 @@ export class MemoryLinkStore implements LinkStore {
 
   async get_link(code: string): Promise<ShortLink | null> {
     return this.links.get(code) ?? null;
+  }
+
+  async update_url(
+    code: string,
+    destination_url: string,
+    metadata: LinkMetadata | undefined,
+    now: Date,
+  ): Promise<ShortLink | null> {
+    const link = this.links.get(code);
+
+    if (!link) {
+      return null;
+    }
+
+    const updated_link: ShortLink = {
+      ...link,
+      destination_url,
+      updated_at: now.toISOString(),
+      ...(metadata ? { metadata } : {}),
+    };
+
+    if (!metadata) {
+      delete updated_link.metadata;
+    }
+
+    this.links.set(code, updated_link);
+    return updated_link;
   }
 
   async disable_link(code: string, now: Date): Promise<boolean> {

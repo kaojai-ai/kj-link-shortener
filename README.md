@@ -32,6 +32,15 @@ curl -X POST "https://example.com/api/links" \
   -d '{"url":"https://example.org/docs","code":"docs","permanent":true}'
 ```
 
+Update the destination URL for an existing code:
+
+```bash
+curl -X PATCH "https://example.com/api/links/docs" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $SHORTENER_API_KEY" \
+  -d '{"url":"https://example.org/new-docs"}'
+```
+
 Redirect:
 
 ```bash
@@ -65,6 +74,7 @@ The create response includes the generated short URL and stored preview metadata
 - Permanent links do not set a DynamoDB TTL attribute.
 - Link creation validates the URL string but does not require the destination to be fetchable.
 - Metadata fetch is best-effort and bounded; if it fails or finds nothing, the link is still created with `metadata: null`.
+- `PATCH /api/links/{code}` updates the destination URL and refreshes metadata best-effort.
 - Metadata fetches block private/local network destinations.
 - Social crawler user agents receive a small HTML preview page with stored Open Graph/Twitter tags.
 - Redirects use `302`.
