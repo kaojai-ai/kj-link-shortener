@@ -77,6 +77,7 @@ export class KjLinkShortenerStack extends Stack {
         SHORTENER_TABLE_NAME: table.tableName,
         SHORTENER_DEFAULT_TTL_DAYS: String(default_ttl_days),
         SHORTENER_API_KEY_SECRET_ID: api_key_secret.secretName,
+        SHORTENER_PUBLIC_BASE_URL: `https://${domain_name}`,
       },
     });
 

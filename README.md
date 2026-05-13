@@ -77,6 +77,7 @@ The create response includes the generated short URL and stored preview metadata
 - `PATCH /api/links/{code}` updates the destination URL and refreshes metadata best-effort.
 - Metadata fetches block private/local network destinations.
 - Social crawler user agents receive a small HTML preview page with stored Open Graph/Twitter tags.
+- Preview pages use the configured custom domain as their canonical and `og:url`.
 - Redirects use `302`.
 - Missing, expired, or disabled links return `404`.
 - DynamoDB TTL eventually deletes expired items, but the Lambda checks expiry on every redirect.

@@ -172,6 +172,12 @@ function is_authorized(event: APIGatewayProxyEventV2, api_key: string): boolean 
 }
 
 function build_short_url(event: APIGatewayProxyEventV2, code: string): string {
+  const public_base_url = process.env.SHORTENER_PUBLIC_BASE_URL?.replace(/\/+$/, '');
+
+  if (public_base_url) {
+    return `${public_base_url}/${encodeURIComponent(code)}`;
+  }
+
   const host = get_header(event, 'host') ?? event.requestContext.domainName;
   const protocol = get_header(event, 'x-forwarded-proto') ?? 'https';
   return `${protocol}://${host}/${encodeURIComponent(code)}`;

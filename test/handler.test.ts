@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { handle_request } from '../src/handler.js';
 import { MemoryLinkStore } from './memory-link-store.js';
 
@@ -156,6 +156,36 @@ describe('handler', () => {
     expect(link?.visit_count).toBe(0);
   });
 
+  it('uses configured public base URL for short URLs and crawler preview canonical URLs', async () => {
+    process.env.SHORTENER_PUBLIC_BASE_URL = 'https://kaoj.ai/';
+    const store = new MemoryLinkStore();
+    const create_response = await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata,
+    );
+
+    expect(JSON.parse(create_response.body ?? '{}').short_url).toBe('https://kaoj.ai/docs');
+
+    const preview_response = await handle_request(
+      event({ method: 'GET', path: '/docs', user_agent: 'facebookexternalhit/1.1' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(preview_response.body).toContain('<link rel="canonical" href="https://kaoj.ai/docs">');
+    expect(preview_response.body).toContain('<meta property="og:url" content="https://kaoj.ai/docs">');
+  });
+
   it('updates the destination URL through the private API', async () => {
     const store = new MemoryLinkStore();
     await handle_request(
@@ -244,3 +274,6 @@ function event(input: {
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
   };
 }
+  afterEach(() => {
+    delete process.env.SHORTENER_PUBLIC_BASE_URL;
+  });
