@@ -104,11 +104,11 @@ pnpm lint
 
 Use `.env.example` as a template for local values. Do not commit real `.env` files.
 
-The operator UI is served by the Lambda at `/`. It asks for the API key in the browser and stores it only in local browser storage; no API key is compiled into the app.
+The operator UI is served by the Lambda at `/web`. It asks for the API key in the browser and stores it only in local browser storage; no API key is compiled into the app.
 
 `pnpm dev` runs a local HTTP wrapper around the Lambda handler with an in-memory link store. It watches TypeScript changes, rebuilds `dist`, restarts the local server automatically, and refreshes the browser page on localhost after a restart.
 
-- URL: `http://localhost:8787/`
+- URL: `http://localhost:8787/web`
 - API key: `dev-api-key`
 - Custom API key: `SHORTENER_DEV_API_KEY=your-key pnpm dev`
 - Custom port: `PORT=3000 pnpm dev`
@@ -118,7 +118,7 @@ Local links exist only while the dev server is running.
 
 To test as a user:
 
-1. Open `http://localhost:8787/`.
+1. Open `http://localhost:8787/web`.
 2. Enter `dev-api-key`.
 3. Create a link such as `https://example.org/docs`.
 4. Open the generated short URL to confirm the redirect.
@@ -228,7 +228,7 @@ Then run **Actions > Deploy > Run workflow**.
 
 ## Operator UI
 
-Open the deployed shortener domain root, for example `https://example.com/`, to use the built-in operator UI.
+Open `/web` on the deployed shortener domain, for example `https://example.com/web`, to use the built-in operator UI.
 
 The UI is intentionally public-safe:
 

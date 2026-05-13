@@ -51,10 +51,10 @@ describe('handler', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it('serves the operator UI at the root path', async () => {
+  it('serves the operator UI at /web', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
-      event({ method: 'GET', path: '/' }),
+      event({ method: 'GET', path: '/web' }),
       store,
       API_KEY,
       30,
@@ -65,6 +65,20 @@ describe('handler', () => {
     expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
     expect(response.body).toContain('KJ Link Shortener');
     expect(response.body).toContain('/api/links');
+  });
+
+  it('redirects root path to https://kaojai.ai', async () => {
+    const store = new MemoryLinkStore();
+    const response = await handle_request(
+      event({ method: 'GET', path: '/' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers?.Location).toBe('https://kaojai.ai');
   });
 
   it('allows all crawlers through robots.txt', async () => {
@@ -120,6 +134,26 @@ describe('handler', () => {
     expect(response.statusCode).toBe(302);
     expect(response.headers?.location).toBe('https://example.org/docs');
     expect(link?.visit_count).toBe(1);
+  });
+
+  it('does not resolve very short link paths', async () => {
+    const store = new MemoryLinkStore();
+    await store.create_link({
+      code: 'abc',
+      destination_url: 'https://example.org/docs',
+      is_permanent: true,
+      now: new Date('2026-05-13T00:00:00.000Z'),
+    });
+
+    const response = await handle_request(
+      event({ method: 'GET', path: '/ab' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(404);
   });
 
   it('does not redirect expired links', async () => {
