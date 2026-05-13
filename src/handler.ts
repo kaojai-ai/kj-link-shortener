@@ -39,6 +39,16 @@ export async function handle_request(
     return json_response(200, { ok: true });
   }
 
+  if (method === 'GET' && path === '/robots.txt') {
+    return {
+      statusCode: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+      },
+      body: 'User-agent: *\nAllow: /\n',
+    };
+  }
+
   if (path.startsWith('/api/')) {
     if (!is_authorized(event, api_key)) {
       return json_response(401, { error: 'Unauthorized' });

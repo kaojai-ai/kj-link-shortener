@@ -12,6 +12,10 @@ describe('handler', () => {
     fetched_at: '2026-05-13T00:00:00.000Z',
   });
 
+  afterEach(() => {
+    delete process.env.SHORTENER_PUBLIC_BASE_URL;
+  });
+
   it('creates a default-TTL link through the private API', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
@@ -45,6 +49,21 @@ describe('handler', () => {
     );
 
     expect(response.statusCode).toBe(401);
+  });
+
+  it('allows all crawlers through robots.txt', async () => {
+    const store = new MemoryLinkStore();
+    const response = await handle_request(
+      event({ method: 'GET', path: '/robots.txt' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers?.['content-type']).toBe('text/plain; charset=utf-8');
+    expect(response.body).toBe('User-agent: *\nAllow: /\n');
   });
 
   it('creates links without metadata when destination loads successfully but has no metadata', async () => {
@@ -321,6 +340,3 @@ function event(input: {
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
   };
 }
-  afterEach(() => {
-    delete process.env.SHORTENER_PUBLIC_BASE_URL;
-  });
