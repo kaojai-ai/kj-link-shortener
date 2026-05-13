@@ -3,6 +3,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
@@ -65,6 +66,59 @@ export class DynamoDbLinkStore implements LinkStore {
     }));
 
     return result.Item ? (result.Item as ShortLink) : null;
+  }
+
+  async update_code(code: string, next_code: string, now: Date): Promise<ShortLink | null> {
+    const link = await this.get_link(code);
+
+    if (!link) {
+      return null;
+    }
+
+    if (code === next_code) {
+      return link;
+    }
+
+    const updated_link: ShortLink = {
+      ...link,
+      code: next_code,
+      updated_at: now.toISOString(),
+    };
+
+    try {
+      await this.client.send(new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: this.table_name,
+              Item: updated_link,
+              ConditionExpression: 'attribute_not_exists(#code)',
+              ExpressionAttributeNames: {
+                '#code': 'code',
+              },
+            },
+          },
+          {
+            Delete: {
+              TableName: this.table_name,
+              Key: { code },
+              ConditionExpression: 'attribute_exists(#code)',
+              ExpressionAttributeNames: {
+                '#code': 'code',
+              },
+            },
+          },
+        ],
+      }));
+    } catch (error) {
+      if (is_conditional_check_failed(error) || is_transaction_cancelled(error)) {
+        throw new DuplicateCodeError(next_code);
+      }
+
+      throw error;
+    }
+
+    return updated_link;
   }
 
   async update_url(
@@ -145,4 +199,9 @@ export class DynamoDbLinkStore implements LinkStore {
 function is_conditional_check_failed(error: unknown): boolean {
   const dynamo_error = error as DynamoDbError;
   return dynamo_error.name === 'ConditionalCheckFailedException';
+}
+
+function is_transaction_cancelled(error: unknown): boolean {
+  const dynamo_error = error as DynamoDbError;
+  return dynamo_error.name === 'TransactionCanceledException';
 }

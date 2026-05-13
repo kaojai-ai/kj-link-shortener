@@ -51,6 +51,22 @@ describe('handler', () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it('serves the operator UI at the root path', async () => {
+    const store = new MemoryLinkStore();
+    const response = await handle_request(
+      event({ method: 'GET', path: '/' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
+    expect(response.body).toContain('KJ Link Shortener');
+    expect(response.body).toContain('/api/links');
+  });
+
   it('allows all crawlers through robots.txt', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
@@ -251,6 +267,85 @@ describe('handler', () => {
 
     expect(redirect_response.statusCode).toBe(302);
     expect(redirect_response.headers?.location).toBe('https://example.org/new-docs');
+  });
+
+  it('updates the short code through the private API', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata,
+    );
+
+    const update_response = await handle_request(
+      event({
+        method: 'PATCH',
+        path: '/api/links/docs',
+        api_key: API_KEY,
+        body: {
+          code: 'manual',
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(update_response.statusCode).toBe(200);
+    expect(JSON.parse(update_response.body ?? '{}')).toMatchObject({
+      code: 'manual',
+      short_url: 'https://example.com/manual',
+      url: 'https://example.org/docs',
+    });
+
+    const old_response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30, no_metadata);
+    const new_response = await handle_request(event({ method: 'GET', path: '/manual' }), store, API_KEY, 30, no_metadata);
+
+    expect(old_response.statusCode).toBe(404);
+    expect(new_response.statusCode).toBe(302);
+    expect(new_response.headers?.location).toBe('https://example.org/docs');
+  });
+
+  it('rejects short code updates to an existing code', async () => {
+    const store = new MemoryLinkStore();
+    await store.create_link({
+      code: 'docs',
+      destination_url: 'https://example.org/docs',
+      is_permanent: true,
+      now: new Date('2026-05-13T00:00:00.000Z'),
+    });
+    await store.create_link({
+      code: 'taken',
+      destination_url: 'https://example.org/taken',
+      is_permanent: true,
+      now: new Date('2026-05-13T00:00:00.000Z'),
+    });
+
+    const update_response = await handle_request(
+      event({
+        method: 'PATCH',
+        path: '/api/links/docs',
+        api_key: API_KEY,
+        body: {
+          code: 'taken',
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(update_response.statusCode).toBe(409);
+    expect(JSON.parse(update_response.body ?? '{}')).toEqual({ error: 'Code already exists' });
   });
 
   it('upserts an existing code through POST when force is true', async () => {

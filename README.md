@@ -97,11 +97,80 @@ The create response includes the generated short URL and stored preview metadata
 
 ```bash
 pnpm install
+pnpm dev
 pnpm test
 pnpm lint
 ```
 
 Use `.env.example` as a template for local values. Do not commit real `.env` files.
+
+The operator UI is served by the Lambda at `/`. It asks for the API key in the browser and stores it only in local browser storage; no API key is compiled into the app.
+
+`pnpm dev` runs a local HTTP wrapper around the Lambda handler with an in-memory link store. It watches TypeScript changes, rebuilds `dist`, restarts the local server automatically, and refreshes the browser page on localhost after a restart.
+
+- URL: `http://localhost:8787/`
+- API key: `dev-api-key`
+- Custom API key: `SHORTENER_DEV_API_KEY=your-key pnpm dev`
+- Custom port: `PORT=3000 pnpm dev`
+- Custom host: `HOST=0.0.0.0 pnpm dev`
+
+Local links exist only while the dev server is running.
+
+To test as a user:
+
+1. Open `http://localhost:8787/`.
+2. Enter `dev-api-key`.
+3. Create a link such as `https://example.org/docs`.
+4. Open the generated short URL to confirm the redirect.
+
+For VS Code breakpoints, add `.vscode/launch.json` locally:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Local Shortener UI",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "env": {
+        "SHORTENER_DEV_API_KEY": "dev-api-key",
+        "PORT": "8787"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/dist-dev/**/*.js"],
+      "serverReadyAction": {
+        "pattern": "running at (http://.*)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      },
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Debug Handler Tests",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "vitest", "run", "test/handler.test.ts", "--inspect-brk", "--no-coverage"],
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
+```
+
+Useful breakpoint files:
+
+- `dev/dev-server.ts`: local HTTP event conversion.
+- `src/handler.ts`: routing, API handling, redirect handling.
+- `src/create-link.ts`: create/upsert behavior.
+- `src/metadata.ts`: metadata fetch behavior.
 
 ## Deploy
 
@@ -151,6 +220,17 @@ pnpm cdk bootstrap aws://ACCOUNT_ID/AWS_REGION
 ```
 
 Then run **Actions > Deploy > Run workflow**.
+
+## Operator UI
+
+Open the deployed shortener domain root, for example `https://example.com/`, to use the built-in operator UI.
+
+The UI is intentionally public-safe:
+
+- It stores the API key only in the operator browser's `localStorage`.
+- It calls same-origin private API routes with `x-api-key`.
+- It supports create, custom code, TTL, permanent links, forced upsert, and URL updates.
+- No production domain, AWS account value, or API key is committed.
 
 ## Required CDK Context
 

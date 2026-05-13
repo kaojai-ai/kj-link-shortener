@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-dev",
+    "rootDir": ".",
+    "types": ["node", "aws-lambda"]
+  },
+  "include": ["dev/**/*.ts", "src/**/*.ts"],
+  "exclude": ["test/**/*.ts", "infra/**/*.ts"]
+}

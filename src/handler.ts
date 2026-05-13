@@ -2,14 +2,15 @@ import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyStructuredResultV2,
 } from 'aws-lambda';
+import { render_admin_ui } from './admin-ui.js';
 import { load_runtime_config } from './config.js';
 import { create_short_link, fetch_metadata_safely, type CreateLinkRequest } from './create-link.js';
 import { DynamoDbLinkStore } from './dynamodb-link-store.js';
 import { html_response, json_response, not_found_response, redirect_response } from './http.js';
-import { is_link_active, type LinkStore } from './link-store.js';
+import { DuplicateCodeError, is_link_active, type LinkStore } from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import { is_preview_crawler, render_preview_html } from './preview-html.js';
-import { is_reserved_code } from './short-code.js';
+import { is_reserved_code, normalize_custom_code, validate_custom_code } from './short-code.js';
 import { normalize_destination_url, validate_destination_url } from './url.js';
 
 type Runtime = {
@@ -34,6 +35,10 @@ export async function handle_request(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const method = event.requestContext.http.method.toUpperCase();
   const path = normalize_path(event.rawPath);
+
+  if (method === 'GET' && path === '/') {
+    return html_response(200, render_admin_ui());
+  }
 
   if (method === 'GET' && path === '/health') {
     return json_response(200, { ok: true });
@@ -91,14 +96,7 @@ async function handle_api_request(
       return json_response(result.status_code, { error: result.message });
     }
 
-    return json_response(201, {
-      code: result.link.code,
-      url: result.link.destination_url,
-      short_url: build_short_url(event, result.link.code),
-      expires_at: result.link.expires_at ?? null,
-      permanent: result.link.is_permanent,
-      metadata: result.link.metadata ?? null,
-    });
+    return link_api_response(event, 201, result.link);
   }
 
   const link_path_match = path.match(/^\/api\/links\/([^/]+)$/);
@@ -132,7 +130,7 @@ async function handle_api_request(
       return json_response(update_result.status_code, { error: update_result.message });
     }
 
-    return json_response(200, update_result.link);
+    return link_api_response(event, 200, update_result.link);
   }
 
   if (link_path_match && method === 'DELETE') {
@@ -207,26 +205,78 @@ async function update_link_url(
   metadata_fetcher: MetadataFetcher,
 ): Promise<
   | { ok: true; link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>> }
-  | { ok: false; status_code: 400 | 404; message: string }
+  | { ok: false; status_code: 400 | 404 | 409; message: string }
 > {
-  if (!is_record(body) || !Object.hasOwn(body, 'url')) {
-    return { ok: false, status_code: 400, message: 'url is required' };
+  if (!is_record(body) || (!Object.hasOwn(body, 'url') && !Object.hasOwn(body, 'code'))) {
+    return { ok: false, status_code: 400, message: 'url or code is required' };
   }
 
-  if (typeof body.url !== 'string') {
-    return { ok: false, status_code: 400, message: 'url must be a string' };
+  let link = await link_store.get_link(code);
+
+  if (!link) {
+    return { ok: false, status_code: 404, message: 'Not found' };
   }
 
-  const destination_url = normalize_destination_url(body.url);
-  const url_error = validate_destination_url(destination_url);
+  if (Object.hasOwn(body, 'url')) {
+    if (typeof body.url !== 'string') {
+      return { ok: false, status_code: 400, message: 'url must be a string' };
+    }
 
-  if (url_error) {
-    return { ok: false, status_code: 400, message: url_error };
+    const destination_url = normalize_destination_url(body.url);
+    const url_error = validate_destination_url(destination_url);
+
+    if (url_error) {
+      return { ok: false, status_code: 400, message: url_error };
+    }
+
+    const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
+    link = await link_store.update_url(link.code, destination_url, metadata, now);
+
+    if (!link) {
+      return { ok: false, status_code: 404, message: 'Not found' };
+    }
   }
 
-  const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
-  const link = await link_store.update_url(code, destination_url, metadata, now);
+  if (Object.hasOwn(body, 'code')) {
+    if (typeof body.code !== 'string') {
+      return { ok: false, status_code: 400, message: 'code must be a string' };
+    }
+
+    const next_code = normalize_custom_code(body.code);
+    const code_error = validate_custom_code(next_code);
+
+    if (code_error) {
+      return { ok: false, status_code: 400, message: code_error };
+    }
+
+    try {
+      link = await link_store.update_code(link.code, next_code, now);
+    } catch (error) {
+      if (error instanceof DuplicateCodeError) {
+        return { ok: false, status_code: 409, message: 'Code already exists' };
+      }
+
+      throw error;
+    }
+  }
+
   return link ? { ok: true, link } : { ok: false, status_code: 404, message: 'Not found' };
+}
+
+function link_api_response(
+  event: APIGatewayProxyEventV2,
+  status_code: number,
+  link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>>,
+): APIGatewayProxyStructuredResultV2 {
+  return json_response(status_code, {
+    code: link.code,
+    url: link.destination_url,
+    destination_url: link.destination_url,
+    short_url: build_short_url(event, link.code),
+    expires_at: link.expires_at ?? null,
+    permanent: link.is_permanent,
+    metadata: link.metadata ?? null,
+  });
 }
 
 function is_record(value: unknown): value is Record<string, unknown> {

@@ -10,6 +10,7 @@
     "cdk": "cdk",
     "cdk:synth": "cdk synth",
     "cdk:deploy": "cdk deploy",
+    "dev": "node scripts/dev.mjs",
     "lint": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.cdk.json",
     "test": "vitest run"
   },
