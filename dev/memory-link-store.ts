@@ -1,6 +1,7 @@
 import {
   DuplicateCodeError,
   type CreateShortLinkInput,
+  type LinkExpiryUpdate,
   type LinkMetadata,
   type LinkStore,
   type ShortLink,
@@ -66,6 +67,7 @@ export class MemoryLinkStore implements LinkStore {
     destination_url: string,
     metadata: LinkMetadata | undefined,
     now: Date,
+    expiry?: LinkExpiryUpdate,
   ): Promise<ShortLink | null> {
     const link = this.links.get(code);
 
@@ -77,8 +79,17 @@ export class MemoryLinkStore implements LinkStore {
       ...link,
       destination_url,
       updated_at: now.toISOString(),
+      ...(expiry ? { is_permanent: expiry.is_permanent } : {}),
       ...(metadata ? { metadata } : {}),
     };
+
+    if (expiry?.is_permanent) {
+      delete updated_link.expires_at;
+      delete updated_link.ttl_epoch_seconds;
+    } else if (expiry) {
+      updated_link.expires_at = expiry.expires_at;
+      updated_link.ttl_epoch_seconds = expiry.ttl_epoch_seconds;
+    }
 
     if (!metadata) {
       delete updated_link.metadata;

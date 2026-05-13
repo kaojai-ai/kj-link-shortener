@@ -29,6 +29,10 @@ export type CreateShortLinkInput = {
   now: Date;
 };
 
+export type LinkExpiryUpdate =
+  | { is_permanent: true }
+  | { is_permanent: false; expires_at: string; ttl_epoch_seconds: number };
+
 export class DuplicateCodeError extends Error {
   constructor(code: string) {
     super(`Short code already exists: ${code}`);
@@ -40,7 +44,13 @@ export interface LinkStore {
   create_link(input: CreateShortLinkInput): Promise<ShortLink>;
   get_link(code: string): Promise<ShortLink | null>;
   update_code(code: string, next_code: string, now: Date): Promise<ShortLink | null>;
-  update_url(code: string, destination_url: string, metadata: LinkMetadata | undefined, now: Date): Promise<ShortLink | null>;
+  update_url(
+    code: string,
+    destination_url: string,
+    metadata: LinkMetadata | undefined,
+    now: Date,
+    expiry?: LinkExpiryUpdate,
+  ): Promise<ShortLink | null>;
   disable_link(code: string, now: Date): Promise<boolean>;
   record_visit(code: string, now: Date): Promise<void>;
 }

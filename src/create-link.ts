@@ -1,4 +1,4 @@
-import { DuplicateCodeError, type LinkStore, type ShortLink } from './link-store.js';
+import { DuplicateCodeError, type LinkExpiryUpdate, type LinkStore, type ShortLink } from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import {
   generate_code,
@@ -13,6 +13,7 @@ export type CreateLinkRequest = {
   url?: unknown;
   code?: unknown;
   ttl_days?: unknown;
+  expires_at?: unknown;
   permanent?: unknown;
   force?: unknown;
 };
@@ -41,10 +42,10 @@ export async function create_short_link(
 
   const permanent = request.permanent === true;
   const force = request.force === true;
-  const ttl_days_result = parse_ttl_days(request.ttl_days, default_ttl_days);
+  const expiry_result = parse_expiry(request, default_ttl_days, now);
 
-  if (!ttl_days_result.ok) {
-    return ttl_days_result;
+  if (!expiry_result.ok) {
+    return expiry_result;
   }
 
   const custom_code = typeof request.code === 'string' && request.code.trim() !== ''
@@ -67,8 +68,7 @@ export async function create_short_link(
       destination_url,
       metadata,
       force,
-      permanent,
-      ttl_days: ttl_days_result.ttl_days,
+      expiry: expiry_result.expiry,
       now,
     });
   }
@@ -77,19 +77,21 @@ export async function create_short_link(
     destination_url,
     metadata,
     force: false,
-    permanent,
-    ttl_days: ttl_days_result.ttl_days,
+    expiry: expiry_result.expiry,
     now,
   });
 }
+
+type LinkExpiry =
+  | { is_permanent: true }
+  | { is_permanent: false; expires_at: Date };
 
 type CreateLinkFields = {
   code?: string;
   destination_url: string;
   metadata?: ShortLink['metadata'];
   force: boolean;
-  permanent: boolean;
-  ttl_days: number;
+  expiry: LinkExpiry;
   now: Date;
 };
 
@@ -108,7 +110,13 @@ async function create_custom_link(store: LinkStore, fields: CreateLinkFields & {
   } catch (error) {
     if (error instanceof DuplicateCodeError) {
       if (fields.force) {
-        const link = await store.update_url(fields.code, fields.destination_url, fields.metadata, fields.now);
+        const link = await store.update_url(
+          fields.code,
+          fields.destination_url,
+          fields.metadata,
+          fields.now,
+          build_expiry_update(fields.expiry),
+        );
 
         if (link) {
           return { ok: true, link };
@@ -145,7 +153,7 @@ async function create_generated_link(store: LinkStore, fields: CreateLinkFields)
 }
 
 function build_create_input(fields: CreateLinkFields & { code: string }) {
-  if (fields.permanent) {
+  if (fields.expiry.is_permanent) {
     return {
       code: fields.code,
       destination_url: fields.destination_url,
@@ -155,7 +163,7 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
     };
   }
 
-  const expires_at = new Date(fields.now.getTime() + fields.ttl_days * 24 * 60 * 60 * 1000);
+  const expires_at = fields.expiry.expires_at;
 
   return {
     code: fields.code,
@@ -165,6 +173,20 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
     expires_at: expires_at.toISOString(),
     ttl_epoch_seconds: Math.floor(expires_at.getTime() / 1000),
     now: fields.now,
+  };
+}
+
+function build_expiry_update(expiry: LinkExpiry): LinkExpiryUpdate {
+  if (expiry.is_permanent) {
+    return {
+      is_permanent: true,
+    };
+  }
+
+  return {
+    is_permanent: false,
+    expires_at: expiry.expires_at.toISOString(),
+    ttl_epoch_seconds: Math.floor(expiry.expires_at.getTime() / 1000),
   };
 }
 
@@ -182,6 +204,60 @@ export async function fetch_metadata_safely(
     });
     return undefined;
   }
+}
+
+function parse_expiry(
+  request: CreateLinkRequest,
+  default_ttl_days: number,
+  now: Date,
+): { ok: true; expiry: LinkExpiry } | { ok: false; status_code: 400; message: string } {
+  if (request.permanent === true) {
+    if (request.expires_at !== undefined && request.expires_at !== null) {
+      return { ok: false, status_code: 400, message: 'expires_at cannot be used when permanent is true' };
+    }
+
+    return { ok: true, expiry: { is_permanent: true } };
+  }
+
+  if (request.expires_at !== undefined && request.expires_at !== null) {
+    if (request.ttl_days !== undefined && request.ttl_days !== null) {
+      return { ok: false, status_code: 400, message: 'expires_at cannot be used with ttl_days' };
+    }
+
+    return parse_expires_at(request.expires_at, now);
+  }
+
+  const ttl_days_result = parse_ttl_days(request.ttl_days, default_ttl_days);
+
+  if (!ttl_days_result.ok) {
+    return ttl_days_result;
+  }
+
+  return {
+    ok: true,
+    expiry: {
+      is_permanent: false,
+      expires_at: new Date(now.getTime() + ttl_days_result.ttl_days * 24 * 60 * 60 * 1000),
+    },
+  };
+}
+
+function parse_expires_at(value: unknown, now: Date): { ok: true; expiry: LinkExpiry } | { ok: false; status_code: 400; message: string } {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return { ok: false, status_code: 400, message: 'expires_at must be an ISO 8601 timestamp string' };
+  }
+
+  const expires_at = new Date(value);
+
+  if (Number.isNaN(expires_at.getTime())) {
+    return { ok: false, status_code: 400, message: 'expires_at must be a valid ISO 8601 timestamp' };
+  }
+
+  if (expires_at.getTime() <= now.getTime()) {
+    return { ok: false, status_code: 400, message: 'expires_at must be in the future' };
+  }
+
+  return { ok: true, expiry: { is_permanent: false, expires_at } };
 }
 
 function parse_ttl_days(value: unknown, default_ttl_days: number): { ok: true; ttl_days: number } | { ok: false; status_code: 400; message: string } {

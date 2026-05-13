@@ -351,6 +351,11 @@ export function render_admin_ui(): string {
             </label>
           </div>
 
+          <label>
+            Expires at
+            <input id="expires-at" type="datetime-local">
+          </label>
+
           <div class="actions">
             <button type="submit">Create link</button>
           </div>
@@ -402,6 +407,7 @@ export function render_admin_ui(): string {
       const api_key = document.querySelector('#api-key');
       const destination_url = document.querySelector('#destination-url');
       const ttl_days = document.querySelector('#ttl-days');
+      const expires_at = document.querySelector('#expires-at');
       const permanent = document.querySelector('#permanent');
       const storage_key = 'kj-link-shortener.api-key';
       let last_short_url = '';
@@ -433,7 +439,11 @@ export function render_admin_ui(): string {
       });
 
       permanent.addEventListener('change', () => {
-        ttl_days.disabled = permanent.checked;
+        sync_expiry_controls(false);
+      });
+
+      expires_at.addEventListener('input', () => {
+        sync_expiry_controls(false);
       });
 
       copy_button.addEventListener('click', async () => {
@@ -447,9 +457,11 @@ export function render_admin_ui(): string {
 
       async function create_link() {
         const payload = { url: destination_url.value.trim() };
+        const expires_at_value = expires_at.value.trim();
 
-        if (ttl_days.value.trim()) payload.ttl_days = Number(ttl_days.value);
         if (permanent.checked) payload.permanent = true;
+        else if (expires_at_value) payload.expires_at = new Date(expires_at_value).toISOString();
+        else if (ttl_days.value.trim()) payload.ttl_days = Number(ttl_days.value);
 
         await request_api('/api/links', {
           method: 'POST',
@@ -592,7 +604,13 @@ export function render_admin_ui(): string {
         code_button.disabled = is_busy || !current_code;
         code_edit_input.disabled = is_busy;
         copy_button.disabled = is_busy || !last_short_url;
-        ttl_days.disabled = is_busy || permanent.checked;
+        sync_expiry_controls(is_busy);
+      }
+
+      function sync_expiry_controls(is_busy) {
+        const has_explicit_expiry = expires_at.value.trim() !== '';
+        expires_at.disabled = is_busy || permanent.checked;
+        ttl_days.disabled = is_busy || permanent.checked || has_explicit_expiry;
       }
     </script>
   </body>

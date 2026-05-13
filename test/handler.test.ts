@@ -38,6 +38,37 @@ describe('handler', () => {
     });
   });
 
+  it('creates a link with an explicit expires_at timestamp through the private API', async () => {
+    const store = new MemoryLinkStore();
+    const response = await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: {
+          url: 'https://example.org/docs',
+          code: 'docs',
+          expires_at: '2026-06-01T10:15:00.000Z',
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response.body ?? '{}')).toMatchObject({
+      code: 'docs',
+      expires_at: '2026-06-01T10:15:00.000Z',
+      permanent: false,
+    });
+
+    const link = await store.get_link('docs');
+    expect(link?.expires_at).toBe('2026-06-01T10:15:00.000Z');
+    expect(link?.ttl_epoch_seconds).toBe(Math.floor(Date.parse('2026-06-01T10:15:00.000Z') / 1000));
+  });
+
   it('rejects create requests without the API key', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
@@ -65,6 +96,7 @@ describe('handler', () => {
     expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
     expect(response.body).toContain('KJ Link Shortener');
     expect(response.body).toContain('/api/links');
+    expect(response.body).toContain('id="expires-at"');
   });
 
   it('redirects root path to https://kaojai.ai', async () => {
@@ -403,7 +435,7 @@ describe('handler', () => {
         method: 'POST',
         path: '/api/links',
         api_key: API_KEY,
-        body: { url: 'https://example.org/new', code: 'docs', force: true },
+        body: { url: 'https://example.org/new', code: 'docs', force: true, expires_at: '2026-06-01T00:00:00.000Z' },
       }),
       store,
       API_KEY,
@@ -418,6 +450,7 @@ describe('handler', () => {
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       code: 'docs',
       url: 'https://example.org/new',
+      expires_at: '2026-06-01T00:00:00.000Z',
       metadata: {
         title: 'New docs',
       },
@@ -427,6 +460,9 @@ describe('handler', () => {
 
     expect(redirect_response.statusCode).toBe(302);
     expect(redirect_response.headers?.location).toBe('https://example.org/new');
+
+    const link = await store.get_link('docs');
+    expect(link?.expires_at).toBe('2026-06-01T00:00:00.000Z');
   });
 });
 

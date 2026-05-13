@@ -40,6 +40,25 @@ describe('create_short_link', () => {
     }
   });
 
+  it('creates a link with an explicit expiry timestamp', async () => {
+    const store = new MemoryLinkStore();
+    const result = await create_short_link(
+      store,
+      { url: 'https://example.org/docs', code: 'docs', expires_at: '2026-05-20T12:30:00.000Z' },
+      30,
+      now,
+      no_metadata,
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.link.is_permanent).toBe(false);
+      expect(result.link.expires_at).toBe('2026-05-20T12:30:00.000Z');
+      expect(result.link.ttl_epoch_seconds).toBe(Math.floor(Date.parse('2026-05-20T12:30:00.000Z') / 1000));
+    }
+  });
+
   it('rejects duplicate custom codes with 409', async () => {
     const store = new MemoryLinkStore();
 
@@ -116,6 +135,21 @@ describe('create_short_link', () => {
       ok: false,
       status_code: 400,
       message: 'ttl_days must be a positive integer',
+    });
+    await expect(create_short_link(store, { url: 'https://example.org', expires_at: '2026-05-12T00:00:00.000Z' }, 30, now, metadata_fetcher)).resolves.toEqual({
+      ok: false,
+      status_code: 400,
+      message: 'expires_at must be in the future',
+    });
+    await expect(create_short_link(store, { url: 'https://example.org', ttl_days: 5, expires_at: '2026-05-20T00:00:00.000Z' }, 30, now, metadata_fetcher)).resolves.toEqual({
+      ok: false,
+      status_code: 400,
+      message: 'expires_at cannot be used with ttl_days',
+    });
+    await expect(create_short_link(store, { url: 'https://example.org', permanent: true, expires_at: '2026-05-20T00:00:00.000Z' }, 30, now, metadata_fetcher)).resolves.toEqual({
+      ok: false,
+      status_code: 400,
+      message: 'expires_at cannot be used when permanent is true',
     });
     await expect(create_short_link(store, { url: 'https://example.org', code: 'api' }, 30, now, metadata_fetcher)).resolves.toEqual({
       ok: false,

@@ -23,6 +23,15 @@ curl -X POST "https://example.com/api/links" \
   -d '{"url":"https://example.org/docs","ttl_days":30}'
 ```
 
+Create a short link that expires at an exact timestamp:
+
+```bash
+curl -X POST "https://example.com/api/links" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $SHORTENER_API_KEY" \
+  -d '{"url":"https://example.org/docs","expires_at":"2026-06-01T10:15:00.000Z"}'
+```
+
 Create a custom permanent short link:
 
 ```bash
@@ -82,6 +91,7 @@ The create response includes the generated short URL and stored preview metadata
 - `force: true` on `POST /api/links` upserts an existing custom code by updating its destination URL and reactivating it if disabled.
 - Reserved paths are `api`, `health`, `admin`, and `www`.
 - Default TTL is 30 days.
+- Create requests can use `expires_at` as an ISO 8601 timestamp instead of `ttl_days` when the link needs an exact expiration time.
 - Permanent links do not set a DynamoDB TTL attribute.
 - Link creation validates the URL string but does not require the destination to be fetchable.
 - Metadata fetch is best-effort and bounded; if it fails or finds nothing, the link is still created with `metadata: null`.
@@ -234,7 +244,7 @@ The UI is intentionally public-safe:
 
 - It stores the API key only in the operator browser's `localStorage`.
 - It calls same-origin private API routes with `x-api-key`.
-- It supports create, custom code, TTL, permanent links, forced upsert, and URL updates.
+- It supports create, custom code, TTL, exact expiration timestamps, permanent links, forced upsert, and URL updates.
 - No production domain, AWS account value, or API key is committed.
 
 ## Required CDK Context

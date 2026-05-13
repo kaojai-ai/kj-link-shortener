@@ -9,6 +9,7 @@ import {
 import {
   DuplicateCodeError,
   type CreateShortLinkInput,
+  type LinkExpiryUpdate,
   type LinkMetadata,
   type LinkStore,
   type ShortLink,
@@ -126,24 +127,47 @@ export class DynamoDbLinkStore implements LinkStore {
     destination_url: string,
     metadata: LinkMetadata | undefined,
     now: Date,
+    expiry?: LinkExpiryUpdate,
   ): Promise<ShortLink | null> {
+    const set_expressions = ['destination_url = :destination_url', 'updated_at = :updated_at'];
+    const remove_expressions = ['disabled_at'];
+    const expression_attribute_names: Record<string, string> = {
+      '#code': 'code',
+      '#metadata': 'metadata',
+    };
+    const expression_attribute_values: Record<string, unknown> = {
+      ':destination_url': destination_url,
+      ':updated_at': now.toISOString(),
+    };
+
+    if (metadata) {
+      set_expressions.push('#metadata = :metadata');
+      expression_attribute_values[':metadata'] = metadata;
+    } else {
+      remove_expressions.push('#metadata');
+    }
+
+    if (expiry) {
+      set_expressions.push('is_permanent = :is_permanent');
+      expression_attribute_values[':is_permanent'] = expiry.is_permanent;
+
+      if (expiry.is_permanent) {
+        remove_expressions.push('expires_at', 'ttl_epoch_seconds');
+      } else {
+        set_expressions.push('expires_at = :expires_at', 'ttl_epoch_seconds = :ttl_epoch_seconds');
+        expression_attribute_values[':expires_at'] = expiry.expires_at;
+        expression_attribute_values[':ttl_epoch_seconds'] = expiry.ttl_epoch_seconds;
+      }
+    }
+
     try {
       const result = await this.client.send(new UpdateCommand({
         TableName: this.table_name,
         Key: { code },
-        UpdateExpression: metadata
-          ? 'set destination_url = :destination_url, #metadata = :metadata, updated_at = :updated_at remove disabled_at'
-          : 'set destination_url = :destination_url, updated_at = :updated_at remove #metadata, disabled_at',
+        UpdateExpression: `set ${set_expressions.join(', ')} remove ${remove_expressions.join(', ')}`,
         ConditionExpression: 'attribute_exists(#code)',
-        ExpressionAttributeNames: {
-          '#code': 'code',
-          '#metadata': 'metadata',
-        },
-        ExpressionAttributeValues: {
-          ':destination_url': destination_url,
-          ...(metadata ? { ':metadata': metadata } : {}),
-          ':updated_at': now.toISOString(),
-        },
+        ExpressionAttributeNames: expression_attribute_names,
+        ExpressionAttributeValues: expression_attribute_values,
         ReturnValues: 'ALL_NEW',
       }));
 
