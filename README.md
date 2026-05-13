@@ -32,6 +32,15 @@ curl -X POST "https://example.com/api/links" \
   -d '{"url":"https://example.org/docs","code":"docs","permanent":true}'
 ```
 
+Upsert an existing custom code:
+
+```bash
+curl -X POST "https://example.com/api/links" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $SHORTENER_API_KEY" \
+  -d '{"url":"https://example.org/new-docs","code":"docs","force":true}'
+```
+
 Update the destination URL for an existing code:
 
 ```bash
@@ -69,6 +78,8 @@ The create response includes the generated short URL and stored preview metadata
 
 - Generated codes use 6 base62 characters.
 - Custom codes must match `[A-Za-z0-9_-]{3,64}`.
+- Duplicate custom-code creates return `409` unless `force: true` is supplied.
+- `force: true` on `POST /api/links` upserts an existing custom code by updating its destination URL and reactivating it if disabled.
 - Reserved paths are `api`, `health`, `admin`, and `www`.
 - Default TTL is 30 days.
 - Permanent links do not set a DynamoDB TTL attribute.

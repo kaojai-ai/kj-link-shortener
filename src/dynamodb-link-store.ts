@@ -78,8 +78,8 @@ export class DynamoDbLinkStore implements LinkStore {
         TableName: this.table_name,
         Key: { code },
         UpdateExpression: metadata
-          ? 'set destination_url = :destination_url, #metadata = :metadata, updated_at = :updated_at'
-          : 'set destination_url = :destination_url, updated_at = :updated_at remove #metadata',
+          ? 'set destination_url = :destination_url, #metadata = :metadata, updated_at = :updated_at remove disabled_at'
+          : 'set destination_url = :destination_url, updated_at = :updated_at remove #metadata, disabled_at',
         ConditionExpression: 'attribute_exists(#code)',
         ExpressionAttributeNames: {
           '#code': 'code',

@@ -49,6 +49,33 @@ describe('create_short_link', () => {
     expect(result).toEqual({ ok: false, status_code: 409, message: 'Code already exists' });
   });
 
+  it('upserts an existing custom code when force is true', async () => {
+    const store = new MemoryLinkStore();
+
+    await create_short_link(store, { url: 'https://example.org/a', code: 'docs' }, 30, now, no_metadata);
+    const result = await create_short_link(
+      store,
+      { url: 'https://example.org/b', code: 'docs', force: true },
+      30,
+      now,
+      async () => ({
+        title: 'Updated docs',
+        fetched_at: now.toISOString(),
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.link.code).toBe('docs');
+      expect(result.link.destination_url).toBe('https://example.org/b');
+      expect(result.link.metadata).toEqual({
+        title: 'Updated docs',
+        fetched_at: now.toISOString(),
+      });
+    }
+  });
+
   it('stores fetched metadata without requiring a create payload option', async () => {
     const store = new MemoryLinkStore();
     const result = await create_short_link(

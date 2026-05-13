@@ -58,6 +58,8 @@ export class MemoryLinkStore implements LinkStore {
       delete updated_link.metadata;
     }
 
+    delete updated_link.disabled_at;
+
     this.links.set(code, updated_link);
     return updated_link;
   }

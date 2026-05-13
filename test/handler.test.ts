@@ -233,6 +233,53 @@ describe('handler', () => {
     expect(redirect_response.statusCode).toBe(302);
     expect(redirect_response.headers?.location).toBe('https://example.org/new-docs');
   });
+
+  it('upserts an existing code through POST when force is true', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/old', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+    await store.disable_link('docs', new Date('2026-05-13T01:00:00.000Z'));
+
+    const response = await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/new', code: 'docs', force: true },
+      }),
+      store,
+      API_KEY,
+      30,
+      async () => ({
+        title: 'New docs',
+        fetched_at: '2026-05-13T02:00:00.000Z',
+      }),
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response.body ?? '{}')).toMatchObject({
+      code: 'docs',
+      url: 'https://example.org/new',
+      metadata: {
+        title: 'New docs',
+      },
+    });
+
+    const redirect_response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30, no_metadata);
+
+    expect(redirect_response.statusCode).toBe(302);
+    expect(redirect_response.headers?.location).toBe('https://example.org/new');
+  });
 });
 
 function event(input: {

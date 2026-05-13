@@ -14,6 +14,7 @@ export type CreateLinkRequest = {
   code?: unknown;
   ttl_days?: unknown;
   permanent?: unknown;
+  force?: unknown;
 };
 
 export type CreateLinkResult =
@@ -39,6 +40,7 @@ export async function create_short_link(
   }
 
   const permanent = request.permanent === true;
+  const force = request.force === true;
   const ttl_days_result = parse_ttl_days(request.ttl_days, default_ttl_days);
 
   if (!ttl_days_result.ok) {
@@ -64,6 +66,7 @@ export async function create_short_link(
       code: custom_code,
       destination_url,
       metadata,
+      force,
       permanent,
       ttl_days: ttl_days_result.ttl_days,
       now,
@@ -73,6 +76,7 @@ export async function create_short_link(
   return create_generated_link(store, {
     destination_url,
     metadata,
+    force: false,
     permanent,
     ttl_days: ttl_days_result.ttl_days,
     now,
@@ -83,6 +87,7 @@ type CreateLinkFields = {
   code?: string;
   destination_url: string;
   metadata?: ShortLink['metadata'];
+  force: boolean;
   permanent: boolean;
   ttl_days: number;
   now: Date;
@@ -102,6 +107,14 @@ async function create_custom_link(store: LinkStore, fields: CreateLinkFields & {
     };
   } catch (error) {
     if (error instanceof DuplicateCodeError) {
+      if (fields.force) {
+        const link = await store.update_url(fields.code, fields.destination_url, fields.metadata, fields.now);
+
+        if (link) {
+          return { ok: true, link };
+        }
+      }
+
       return { ok: false, status_code: 409, message: 'Code already exists' };
     }
 
