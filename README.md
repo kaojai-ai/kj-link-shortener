@@ -69,10 +69,42 @@ pnpm cdk deploy \
   -c hostedZoneDomain=example.com \
   -c hostedZoneId=Z00000000000000000000 \
   -c certificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example \
-  -c apiKeySecretName=/example/link-shortener/api-key
+  -c apiKeySecretName=example/link-shortener/api-key
 ```
 
 `apiKeySecretName` points to an AWS Secrets Manager secret containing the private API key. The repo should contain only placeholder examples.
+
+## GitHub Actions Deploy
+
+The deploy workflow is manual only and reads production values from the GitHub `production` environment. Do not commit real deployment values.
+
+Create these environment variables:
+
+- `AWS_REGION`: AWS region for Lambda and DynamoDB, for example `ap-southeast-1`.
+- `DOMAIN_NAME`: public shortener domain, for example `example.com`.
+- `HOSTED_ZONE_DOMAIN`: Route53 hosted zone domain, for example `example.com`.
+- `HOSTED_ZONE_ID`: Route53 hosted zone ID.
+- `CERTIFICATE_ARN`: ACM certificate ARN in `us-east-1` for CloudFront.
+- `API_KEY_SECRET_NAME`: AWS Secrets Manager secret name or ARN containing the private API key.
+
+Create this environment secret:
+
+- `AWS_ROLE_TO_ASSUME`: IAM role ARN trusted by GitHub Actions OIDC for this repository.
+
+Optional environment variables:
+
+- `DEFAULT_TTL_DAYS`
+- `TABLE_NAME`
+- `LAMBDA_MEMORY_SIZE`
+- `LAMBDA_TIMEOUT_SECONDS`
+
+The AWS account must be CDK-bootstrapped before the workflow can deploy:
+
+```bash
+pnpm cdk bootstrap aws://ACCOUNT_ID/AWS_REGION
+```
+
+Then run **Actions > Deploy > Run workflow**.
 
 ## Required CDK Context
 

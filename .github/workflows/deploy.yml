@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack_name:
+        description: CDK stack name to deploy
+        required: false
+        default: KjLinkShortenerStack
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deployment config
+        run: |
+          missing=0
+          for name in AWS_REGION DOMAIN_NAME HOSTED_ZONE_DOMAIN HOSTED_ZONE_ID CERTIFICATE_ARN API_KEY_SECRET_NAME; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required"
+              missing=1
+            fi
+          done
+
+          if [ -z "$AWS_ROLE_TO_ASSUME" ]; then
+            echo "::error::AWS_ROLE_TO_ASSUME is required"
+            missing=1
+          fi
+
+          exit "$missing"
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          HOSTED_ZONE_DOMAIN: ${{ vars.HOSTED_ZONE_DOMAIN }}
+          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+          CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
+          API_KEY_SECRET_NAME: ${{ vars.API_KEY_SECRET_NAME }}
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy CDK stack
+        run: |
+          args=(
+            "$STACK_NAME"
+            "--require-approval" "never"
+            "-c" "domainName=$DOMAIN_NAME"
+            "-c" "hostedZoneDomain=$HOSTED_ZONE_DOMAIN"
+            "-c" "hostedZoneId=$HOSTED_ZONE_ID"
+            "-c" "certificateArn=$CERTIFICATE_ARN"
+            "-c" "apiKeySecretName=$API_KEY_SECRET_NAME"
+          )
+
+          if [ -n "$DEFAULT_TTL_DAYS" ]; then
+            args+=("-c" "defaultTtlDays=$DEFAULT_TTL_DAYS")
+          fi
+
+          if [ -n "$TABLE_NAME" ]; then
+            args+=("-c" "tableName=$TABLE_NAME")
+          fi
+
+          if [ -n "$LAMBDA_MEMORY_SIZE" ]; then
+            args+=("-c" "lambdaMemorySize=$LAMBDA_MEMORY_SIZE")
+          fi
+
+          if [ -n "$LAMBDA_TIMEOUT_SECONDS" ]; then
+            args+=("-c" "lambdaTimeoutSeconds=$LAMBDA_TIMEOUT_SECONDS")
+          fi
+
+          pnpm cdk deploy "${args[@]}"
+        env:
+          STACK_NAME: ${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          HOSTED_ZONE_DOMAIN: ${{ vars.HOSTED_ZONE_DOMAIN }}
+          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+          CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
+          API_KEY_SECRET_NAME: ${{ vars.API_KEY_SECRET_NAME }}
+          DEFAULT_TTL_DAYS: ${{ vars.DEFAULT_TTL_DAYS }}
+          TABLE_NAME: ${{ vars.TABLE_NAME }}
+          LAMBDA_MEMORY_SIZE: ${{ vars.LAMBDA_MEMORY_SIZE }}
+          LAMBDA_TIMEOUT_SECONDS: ${{ vars.LAMBDA_TIMEOUT_SECONDS }}
