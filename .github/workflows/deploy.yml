@@ -99,6 +99,10 @@ jobs:
             args+=("-c" "tableName=$TABLE_NAME")
           fi
 
+          if [ -n "$LAMBDA_FUNCTION_NAME" ]; then
+            args+=("-c" "lambdaFunctionName=$LAMBDA_FUNCTION_NAME")
+          fi
+
           if [ -n "$LAMBDA_MEMORY_SIZE" ]; then
             args+=("-c" "lambdaMemorySize=$LAMBDA_MEMORY_SIZE")
           fi
@@ -117,5 +121,6 @@ jobs:
           API_KEY_SECRET_NAME: ${{ vars.API_KEY_SECRET_NAME }}
           DEFAULT_TTL_DAYS: ${{ vars.DEFAULT_TTL_DAYS }}
           TABLE_NAME: ${{ vars.TABLE_NAME }}
+          LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           LAMBDA_MEMORY_SIZE: ${{ vars.LAMBDA_MEMORY_SIZE }}
           LAMBDA_TIMEOUT_SECONDS: ${{ vars.LAMBDA_TIMEOUT_SECONDS }}

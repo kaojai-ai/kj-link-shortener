@@ -31,6 +31,7 @@ export class KjLinkShortenerStack extends Stack {
     const certificate_arn = get_required_context(this, 'certificateArn');
     const api_key_secret_name = get_required_context(this, 'apiKeySecretName');
     const table_name = get_optional_context(this, 'tableName');
+    const lambda_function_name = get_optional_context(this, 'lambdaFunctionName');
     const default_ttl_days = get_number_context(this, 'defaultTtlDays', 30);
     const lambda_memory_size = get_number_context(this, 'lambdaMemorySize', 256);
     const lambda_timeout_seconds = get_number_context(this, 'lambdaTimeoutSeconds', 10);
@@ -62,6 +63,7 @@ export class KjLinkShortenerStack extends Stack {
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,
+      functionName: lambda_function_name,
       memorySize: lambda_memory_size,
       timeout: Duration.seconds(lambda_timeout_seconds),
       logGroup: function_log_group,

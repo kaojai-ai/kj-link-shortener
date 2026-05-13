@@ -69,7 +69,8 @@ pnpm cdk deploy \
   -c hostedZoneDomain=example.com \
   -c hostedZoneId=Z00000000000000000000 \
   -c certificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example \
-  -c apiKeySecretName=example/link-shortener/api-key
+  -c apiKeySecretName=example/link-shortener/api-key \
+  -c lambdaFunctionName=kj-link-shortener
 ```
 
 `apiKeySecretName` points to an AWS Secrets Manager secret containing the private API key. The repo should contain only placeholder examples.
@@ -95,6 +96,7 @@ Optional environment variables:
 
 - `DEFAULT_TTL_DAYS`
 - `TABLE_NAME`
+- `LAMBDA_FUNCTION_NAME`, for example `kj-link-shortener`
 - `LAMBDA_MEMORY_SIZE`
 - `LAMBDA_TIMEOUT_SECONDS`
 
@@ -118,6 +120,7 @@ Optional context:
 
 - `defaultTtlDays`: default TTL in days, default `30`.
 - `tableName`: DynamoDB table name.
+- `lambdaFunctionName`: Lambda function name.
 - `lambdaMemorySize`: Lambda memory in MB, default `256`.
 - `lambdaTimeoutSeconds`: Lambda timeout, default `10`.
 
