@@ -5,8 +5,10 @@ import type {
 import { load_runtime_config } from './config.js';
 import { create_short_link, type CreateLinkRequest } from './create-link.js';
 import { DynamoDbLinkStore } from './dynamodb-link-store.js';
-import { json_response, not_found_response, redirect_response } from './http.js';
+import { html_response, json_response, not_found_response, redirect_response } from './http.js';
 import { is_link_active, type LinkStore } from './link-store.js';
+import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
+import { is_preview_crawler, render_preview_html } from './preview-html.js';
 import { is_reserved_code } from './short-code.js';
 
 type Runtime = {
@@ -27,6 +29,7 @@ export async function handle_request(
   link_store: LinkStore,
   api_key: string,
   default_ttl_days: number,
+  metadata_fetcher: MetadataFetcher = fetch_link_metadata,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const method = event.requestContext.http.method.toUpperCase();
   const path = normalize_path(event.rawPath);
@@ -40,11 +43,11 @@ export async function handle_request(
       return json_response(401, { error: 'Unauthorized' });
     }
 
-    return handle_api_request(event, method, path, link_store, default_ttl_days);
+    return handle_api_request(event, method, path, link_store, default_ttl_days, metadata_fetcher);
   }
 
   if (method === 'GET') {
-    return handle_redirect(path, link_store);
+    return handle_redirect(event, path, link_store);
   }
 
   return json_response(405, { error: 'Method not allowed' });
@@ -56,6 +59,7 @@ async function handle_api_request(
   path: string,
   link_store: LinkStore,
   default_ttl_days: number,
+  metadata_fetcher: MetadataFetcher,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   if (method === 'POST' && path === '/api/links') {
     const parsed_body = parse_json_body(event.body);
@@ -68,6 +72,8 @@ async function handle_api_request(
       link_store,
       parsed_body.body as CreateLinkRequest,
       default_ttl_days,
+      new Date(),
+      metadata_fetcher,
     );
 
     if (!result.ok) {
@@ -77,8 +83,10 @@ async function handle_api_request(
     return json_response(201, {
       code: result.link.code,
       url: result.link.destination_url,
+      short_url: build_short_url(event, result.link.code),
       expires_at: result.link.expires_at ?? null,
       permanent: result.link.is_permanent,
+      metadata: result.link.metadata ?? null,
     });
   }
 
@@ -103,6 +111,7 @@ async function handle_api_request(
 }
 
 async function handle_redirect(
+  event: APIGatewayProxyEventV2,
   path: string,
   link_store: LinkStore,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -118,6 +127,10 @@ async function handle_redirect(
     return not_found_response();
   }
 
+  if (is_preview_crawler(get_header(event, 'user-agent'))) {
+    return html_response(200, render_preview_html(link, build_short_url(event, code)));
+  }
+
   await link_store.record_visit(code, new Date());
   return redirect_response(link.destination_url);
 }
@@ -131,8 +144,20 @@ function normalize_path(path: string): string {
 }
 
 function is_authorized(event: APIGatewayProxyEventV2, api_key: string): boolean {
-  const supplied_key = event.headers['x-api-key'] ?? event.headers['X-Api-Key'];
+  const supplied_key = get_header(event, 'x-api-key');
   return supplied_key === api_key;
+}
+
+function build_short_url(event: APIGatewayProxyEventV2, code: string): string {
+  const host = get_header(event, 'host') ?? event.requestContext.domainName;
+  const protocol = get_header(event, 'x-forwarded-proto') ?? 'https';
+  return `${protocol}://${host}/${encodeURIComponent(code)}`;
+}
+
+function get_header(event: APIGatewayProxyEventV2, name: string): string | undefined {
+  const lower_name = name.toLowerCase();
+  const header_entry = Object.entries(event.headers).find(([key]) => key.toLowerCase() === lower_name);
+  return header_entry?.[1];
 }
 
 function parse_json_body(body: string | undefined): { ok: true; body: unknown } | { ok: false; message: string } {

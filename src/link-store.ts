@@ -1,6 +1,7 @@
 export type ShortLink = {
   code: string;
   destination_url: string;
+  metadata?: LinkMetadata;
   created_at: string;
   updated_at: string;
   expires_at?: string;
@@ -11,9 +12,17 @@ export type ShortLink = {
   visit_count: number;
 };
 
+export type LinkMetadata = {
+  title?: string;
+  description?: string;
+  image?: string;
+  fetched_at: string;
+};
+
 export type CreateShortLinkInput = {
   code: string;
   destination_url: string;
+  metadata?: LinkMetadata;
   expires_at?: string;
   ttl_epoch_seconds?: number;
   is_permanent: boolean;

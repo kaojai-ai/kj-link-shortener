@@ -6,6 +6,12 @@ import { MemoryLinkStore } from './memory-link-store.js';
 const API_KEY = 'test-api-key';
 
 describe('handler', () => {
+  const no_metadata = async () => undefined;
+  const metadata = async () => ({
+    title: 'Example',
+    fetched_at: '2026-05-13T00:00:00.000Z',
+  });
+
   it('creates a default-TTL link through the private API', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
@@ -13,12 +19,18 @@ describe('handler', () => {
       store,
       API_KEY,
       30,
+      metadata,
     );
 
     expect(response.statusCode).toBe(201);
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       url: 'https://example.org',
+      short_url: expect.stringMatching(/^https:\/\/example.com\//),
       permanent: false,
+      metadata: {
+        title: 'Example',
+        fetched_at: '2026-05-13T00:00:00.000Z',
+      },
     });
   });
 
@@ -29,9 +41,27 @@ describe('handler', () => {
       store,
       API_KEY,
       30,
+      no_metadata,
     );
 
     expect(response.statusCode).toBe(401);
+  });
+
+  it('creates links without metadata when destination loads successfully but has no metadata', async () => {
+    const store = new MemoryLinkStore();
+    const response = await handle_request(
+      event({ method: 'POST', path: '/api/links', api_key: API_KEY, body: { url: 'https://example.org' } }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response.body ?? '{}')).toMatchObject({
+      url: 'https://example.org',
+      metadata: null,
+    });
   });
 
   it('redirects active links and records a visit', async () => {
@@ -46,9 +76,10 @@ describe('handler', () => {
       store,
       API_KEY,
       30,
+      no_metadata,
     );
 
-    const response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30);
+    const response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30, no_metadata);
     const link = await store.get_link('docs');
 
     expect(response.statusCode).toBe(302);
@@ -67,7 +98,7 @@ describe('handler', () => {
       now: new Date('2019-01-01T00:00:00.000Z'),
     });
 
-    const response = await handle_request(event({ method: 'GET', path: '/old' }), store, API_KEY, 30);
+    const response = await handle_request(event({ method: 'GET', path: '/old' }), store, API_KEY, 30, no_metadata);
 
     expect(response.statusCode).toBe(404);
   });
@@ -82,11 +113,47 @@ describe('handler', () => {
     });
     await store.disable_link('disabled', new Date('2026-05-13T01:00:00.000Z'));
 
-    const disabled_response = await handle_request(event({ method: 'GET', path: '/disabled' }), store, API_KEY, 30);
-    const missing_response = await handle_request(event({ method: 'GET', path: '/missing' }), store, API_KEY, 30);
+    const disabled_response = await handle_request(event({ method: 'GET', path: '/disabled' }), store, API_KEY, 30, no_metadata);
+    const missing_response = await handle_request(event({ method: 'GET', path: '/missing' }), store, API_KEY, 30, no_metadata);
 
     expect(disabled_response.statusCode).toBe(404);
     expect(missing_response.statusCode).toBe(404);
+  });
+
+  it('returns stored metadata as preview HTML for crawler requests', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs', permanent: true },
+      }),
+      store,
+      API_KEY,
+      30,
+      async () => ({
+        title: 'Example <Docs>',
+        description: 'Useful "docs"',
+        image: 'https://example.org/og.png',
+        fetched_at: '2026-05-13T00:00:00.000Z',
+      }),
+    );
+
+    const response = await handle_request(
+      event({ method: 'GET', path: '/docs', user_agent: 'Slackbot-LinkExpanding 1.0' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+    const link = await store.get_link('docs');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
+    expect(response.body).toContain('<meta property="og:title" content="Example &lt;Docs&gt;">');
+    expect(response.body).toContain('<meta property="og:image" content="https://example.org/og.png">');
+    expect(link?.visit_count).toBe(0);
   });
 });
 
@@ -94,6 +161,7 @@ function event(input: {
   method: string;
   path: string;
   api_key?: string;
+  user_agent?: string;
   body?: unknown;
 }): APIGatewayProxyEventV2 {
   return {
@@ -102,6 +170,8 @@ function event(input: {
     rawPath: input.path,
     rawQueryString: '',
     headers: {
+      host: 'example.com',
+      ...(input.user_agent ? { 'user-agent': input.user_agent } : {}),
       ...(input.api_key ? { 'x-api-key': input.api_key } : {}),
     },
     requestContext: {
@@ -114,7 +184,7 @@ function event(input: {
         path: input.path,
         protocol: 'HTTP/1.1',
         sourceIp: '127.0.0.1',
-        userAgent: 'vitest',
+        userAgent: input.user_agent ?? 'vitest',
       },
       requestId: 'test',
       routeKey: '$default',

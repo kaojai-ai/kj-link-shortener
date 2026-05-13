@@ -38,6 +38,24 @@ Redirect:
 curl -i "https://example.com/docs"
 ```
 
+The create response includes the generated short URL and stored preview metadata:
+
+```json
+{
+  "code": "docs",
+  "url": "https://example.org/docs",
+  "short_url": "https://example.com/docs",
+  "expires_at": null,
+  "permanent": true,
+  "metadata": {
+    "title": "Example Docs",
+    "description": "Documentation preview text",
+    "image": "https://example.org/og.png",
+    "fetched_at": "2026-05-13T00:00:00.000Z"
+  }
+}
+```
+
 ## Behavior
 
 - Generated codes use 6 base62 characters.
@@ -45,6 +63,10 @@ curl -i "https://example.com/docs"
 - Reserved paths are `api`, `health`, `admin`, and `www`.
 - Default TTL is 30 days.
 - Permanent links do not set a DynamoDB TTL attribute.
+- Link creation validates the URL string but does not require the destination to be fetchable.
+- Metadata fetch is best-effort and bounded; if it fails or finds nothing, the link is still created with `metadata: null`.
+- Metadata fetches block private/local network destinations.
+- Social crawler user agents receive a small HTML preview page with stored Open Graph/Twitter tags.
 - Redirects use `302`.
 - Missing, expired, or disabled links return `404`.
 - DynamoDB TTL eventually deletes expired items, but the Lambda checks expiry on every redirect.

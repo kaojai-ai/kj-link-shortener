@@ -1,4 +1,5 @@
 import { DuplicateCodeError, type LinkStore, type ShortLink } from './link-store.js';
+import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import {
   generate_code,
   normalize_custom_code,
@@ -24,6 +25,7 @@ export async function create_short_link(
   request: CreateLinkRequest,
   default_ttl_days: number,
   now = new Date(),
+  metadata_fetcher: MetadataFetcher = fetch_link_metadata,
 ): Promise<CreateLinkResult> {
   if (typeof request.url !== 'string') {
     return { ok: false, status_code: 400, message: 'url is required' };
@@ -43,10 +45,25 @@ export async function create_short_link(
     return ttl_days_result;
   }
 
-  if (typeof request.code === 'string' && request.code.trim() !== '') {
+  const custom_code = typeof request.code === 'string' && request.code.trim() !== ''
+    ? normalize_custom_code(request.code)
+    : undefined;
+
+  if (custom_code) {
+    const code_error = validate_custom_code(custom_code);
+
+    if (code_error) {
+      return { ok: false, status_code: 400, message: code_error };
+    }
+  }
+
+  const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
+
+  if (custom_code) {
     return create_custom_link(store, {
-      code: normalize_custom_code(request.code),
+      code: custom_code,
       destination_url,
+      metadata,
       permanent,
       ttl_days: ttl_days_result.ttl_days,
       now,
@@ -55,6 +72,7 @@ export async function create_short_link(
 
   return create_generated_link(store, {
     destination_url,
+    metadata,
     permanent,
     ttl_days: ttl_days_result.ttl_days,
     now,
@@ -64,6 +82,7 @@ export async function create_short_link(
 type CreateLinkFields = {
   code?: string;
   destination_url: string;
+  metadata?: ShortLink['metadata'];
   permanent: boolean;
   ttl_days: number;
   now: Date;
@@ -117,6 +136,7 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
     return {
       code: fields.code,
       destination_url: fields.destination_url,
+      ...(fields.metadata ? { metadata: fields.metadata } : {}),
       is_permanent: true,
       now: fields.now,
     };
@@ -127,11 +147,28 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
   return {
     code: fields.code,
     destination_url: fields.destination_url,
+    ...(fields.metadata ? { metadata: fields.metadata } : {}),
     is_permanent: false,
     expires_at: expires_at.toISOString(),
     ttl_epoch_seconds: Math.floor(expires_at.getTime() / 1000),
     now: fields.now,
   };
+}
+
+async function fetch_metadata_safely(
+  metadata_fetcher: MetadataFetcher,
+  destination_url: string,
+  now: Date,
+): Promise<ShortLink['metadata'] | undefined> {
+  try {
+    return await metadata_fetcher(destination_url, now);
+  } catch (error) {
+    console.warn('metadata_fetch_failed', {
+      error: error instanceof Error ? error.message : 'unknown error',
+      url: destination_url,
+    });
+    return undefined;
+  }
 }
 
 function parse_ttl_days(value: unknown, default_ttl_days: number): { ok: true; ttl_days: number } | { ok: false; status_code: 400; message: string } {

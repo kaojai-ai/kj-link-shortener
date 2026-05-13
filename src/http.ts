@@ -33,3 +33,14 @@ export function redirect_response(destination_url: string): APIGatewayProxyStruc
     },
   };
 }
+
+export function html_response(status_code: number, body: string): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode: status_code,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+    body,
+  };
+}
