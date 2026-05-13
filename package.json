@@ -1,0 +1,32 @@
+{
+  "name": "kj-link-shortener",
+  "version": "0.1.0",
+  "description": "Small AWS-native URL shortener for custom domains.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/handler.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.app.json && tsc -p tsconfig.cdk.json",
+    "cdk": "cdk",
+    "cdk:synth": "cdk synth",
+    "cdk:deploy": "cdk deploy",
+    "lint": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.cdk.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.972.0",
+    "@aws-sdk/client-secrets-manager": "^3.972.0",
+    "@aws-sdk/lib-dynamodb": "^3.972.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^22.10.2",
+    "aws-cdk": "^2.1019.2",
+    "aws-cdk-lib": "^2.215.0",
+    "constructs": "^10.4.2",
+    "esbuild": "^0.25.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

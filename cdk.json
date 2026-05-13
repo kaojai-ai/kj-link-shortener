@@ -1,0 +1,7 @@
+{
+  "app": "node --loader ts-node/esm infra/app.ts",
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true
+  }
+}

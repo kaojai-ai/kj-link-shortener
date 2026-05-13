@@ -1,0 +1,158 @@
+import type {
+  APIGatewayProxyEventV2,
+  APIGatewayProxyStructuredResultV2,
+} from 'aws-lambda';
+import { load_runtime_config } from './config.js';
+import { create_short_link, type CreateLinkRequest } from './create-link.js';
+import { DynamoDbLinkStore } from './dynamodb-link-store.js';
+import { json_response, not_found_response, redirect_response } from './http.js';
+import { is_link_active, type LinkStore } from './link-store.js';
+import { is_reserved_code } from './short-code.js';
+
+type Runtime = {
+  store: LinkStore;
+  api_key: string;
+  default_ttl_days: number;
+};
+
+let runtime_promise: Promise<Runtime> | null = null;
+
+export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> {
+  const runtime = await get_runtime();
+  return handle_request(event, runtime.store, runtime.api_key, runtime.default_ttl_days);
+}
+
+export async function handle_request(
+  event: APIGatewayProxyEventV2,
+  link_store: LinkStore,
+  api_key: string,
+  default_ttl_days: number,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const method = event.requestContext.http.method.toUpperCase();
+  const path = normalize_path(event.rawPath);
+
+  if (method === 'GET' && path === '/health') {
+    return json_response(200, { ok: true });
+  }
+
+  if (path.startsWith('/api/')) {
+    if (!is_authorized(event, api_key)) {
+      return json_response(401, { error: 'Unauthorized' });
+    }
+
+    return handle_api_request(event, method, path, link_store, default_ttl_days);
+  }
+
+  if (method === 'GET') {
+    return handle_redirect(path, link_store);
+  }
+
+  return json_response(405, { error: 'Method not allowed' });
+}
+
+async function handle_api_request(
+  event: APIGatewayProxyEventV2,
+  method: string,
+  path: string,
+  link_store: LinkStore,
+  default_ttl_days: number,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  if (method === 'POST' && path === '/api/links') {
+    const parsed_body = parse_json_body(event.body);
+
+    if (!parsed_body.ok) {
+      return json_response(400, { error: parsed_body.message });
+    }
+
+    const result = await create_short_link(
+      link_store,
+      parsed_body.body as CreateLinkRequest,
+      default_ttl_days,
+    );
+
+    if (!result.ok) {
+      return json_response(result.status_code, { error: result.message });
+    }
+
+    return json_response(201, {
+      code: result.link.code,
+      url: result.link.destination_url,
+      expires_at: result.link.expires_at ?? null,
+      permanent: result.link.is_permanent,
+    });
+  }
+
+  const link_path_match = path.match(/^\/api\/links\/([^/]+)$/);
+
+  if (link_path_match && method === 'GET') {
+    const link = await link_store.get_link(decodeURIComponent(link_path_match[1] ?? ''));
+
+    if (!link) {
+      return not_found_response();
+    }
+
+    return json_response(200, link);
+  }
+
+  if (link_path_match && method === 'DELETE') {
+    const disabled = await link_store.disable_link(decodeURIComponent(link_path_match[1] ?? ''), new Date());
+    return disabled ? json_response(200, { ok: true }) : not_found_response();
+  }
+
+  return json_response(404, { error: 'Not found' });
+}
+
+async function handle_redirect(
+  path: string,
+  link_store: LinkStore,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const code = decodeURIComponent(path.replace(/^\/+/, ''));
+
+  if (!code || code.includes('/') || is_reserved_code(code)) {
+    return not_found_response();
+  }
+
+  const link = await link_store.get_link(code);
+
+  if (!link || !is_link_active(link, new Date())) {
+    return not_found_response();
+  }
+
+  await link_store.record_visit(code, new Date());
+  return redirect_response(link.destination_url);
+}
+
+function normalize_path(path: string): string {
+  if (!path || path === '/') {
+    return '/';
+  }
+
+  return path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+}
+
+function is_authorized(event: APIGatewayProxyEventV2, api_key: string): boolean {
+  const supplied_key = event.headers['x-api-key'] ?? event.headers['X-Api-Key'];
+  return supplied_key === api_key;
+}
+
+function parse_json_body(body: string | undefined): { ok: true; body: unknown } | { ok: false; message: string } {
+  if (!body) {
+    return { ok: false, message: 'Request body is required' };
+  }
+
+  try {
+    return { ok: true, body: JSON.parse(body) };
+  } catch {
+    return { ok: false, message: 'Request body must be valid JSON' };
+  }
+}
+
+function get_runtime(): Promise<Runtime> {
+  runtime_promise ??= load_runtime_config().then((loaded_config) => ({
+    store: new DynamoDbLinkStore(loaded_config.table_name),
+    api_key: loaded_config.api_key,
+    default_ttl_days: loaded_config.default_ttl_days,
+  }));
+
+  return runtime_promise;
+}

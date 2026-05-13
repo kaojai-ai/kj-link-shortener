@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-infra",
+    "rootDir": "infra"
+  },
+  "include": ["infra/**/*.ts"]
+}
