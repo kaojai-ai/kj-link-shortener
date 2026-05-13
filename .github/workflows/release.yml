@@ -111,6 +111,14 @@ jobs:
             args+=("-c" "lambdaTimeoutSeconds=$LAMBDA_TIMEOUT_SECONDS")
           fi
 
+          if [ -n "$LAMBDA_ALIAS_NAME" ]; then
+            args+=("-c" "lambdaAliasName=$LAMBDA_ALIAS_NAME")
+          fi
+
+          if [ -n "$LAMBDA_VERSION_DESCRIPTION" ]; then
+            args+=("-c" "lambdaVersionDescription=$LAMBDA_VERSION_DESCRIPTION")
+          fi
+
           pnpm cdk deploy "${args[@]}"
         env:
           STACK_NAME: ${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
@@ -124,3 +132,5 @@ jobs:
           LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
           LAMBDA_MEMORY_SIZE: ${{ vars.LAMBDA_MEMORY_SIZE }}
           LAMBDA_TIMEOUT_SECONDS: ${{ vars.LAMBDA_TIMEOUT_SECONDS }}
+          LAMBDA_ALIAS_NAME: ${{ vars.LAMBDA_ALIAS_NAME }}
+          LAMBDA_VERSION_DESCRIPTION: ${{ format('run {0} ({1})', github.run_number, github.sha) }}

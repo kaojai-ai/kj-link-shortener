@@ -32,6 +32,8 @@ export class KjLinkShortenerStack extends Stack {
     const api_key_secret_name = get_required_context(this, 'apiKeySecretName');
     const table_name = get_optional_context(this, 'tableName');
     const lambda_function_name = get_optional_context(this, 'lambdaFunctionName');
+    const lambda_alias_name = get_optional_context(this, 'lambdaAliasName') ?? 'production';
+    const lambda_version_description = get_optional_context(this, 'lambdaVersionDescription');
     const default_ttl_days = get_number_context(this, 'defaultTtlDays', 30);
     const lambda_memory_size = get_number_context(this, 'lambdaMemorySize', 256);
     const lambda_timeout_seconds = get_number_context(this, 'lambdaTimeoutSeconds', 10);
@@ -67,6 +69,9 @@ export class KjLinkShortenerStack extends Stack {
       memorySize: lambda_memory_size,
       timeout: Duration.seconds(lambda_timeout_seconds),
       logGroup: function_log_group,
+      currentVersionOptions: {
+        description: lambda_version_description,
+      },
       bundling: {
         target: 'node22',
         format: lambdaNodejs.OutputFormat.CJS,
@@ -84,7 +89,11 @@ export class KjLinkShortenerStack extends Stack {
     table.grantReadWriteData(redirect_function);
     api_key_secret.grantRead(redirect_function);
 
-    const function_url = redirect_function.addFunctionUrl({
+    const function_alias = redirect_function.addAlias(lambda_alias_name, {
+      description: lambda_version_description,
+    });
+
+    const function_url = function_alias.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
 
@@ -119,6 +128,14 @@ export class KjLinkShortenerStack extends Stack {
 
     new CfnOutput(this, 'ShortenerTableName', {
       value: table.tableName,
+    });
+
+    new CfnOutput(this, 'ShortenerFunctionAlias', {
+      value: function_alias.functionArn,
+    });
+
+    new CfnOutput(this, 'ShortenerFunctionVersion', {
+      value: redirect_function.currentVersion.version,
     });
   }
 }

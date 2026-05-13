@@ -188,6 +188,9 @@ pnpm cdk deploy \
 
 `apiKeySecretName` points to an AWS Secrets Manager secret containing the private API key. The repo should contain only placeholder examples.
 
+Deployments create a Lambda alias named `production` by default and publish the latest function version to it.
+If `production` is not suitable, pass `-c lambdaAliasName=<alias-name>` when deploying.
+
 ## GitHub Actions Deploy
 
 The deploy workflow is manual only and reads production values from the GitHub `production` environment. Do not commit real deployment values.
@@ -212,6 +215,8 @@ Optional environment variables:
 - `LAMBDA_FUNCTION_NAME`, for example `kj-link-shortener`
 - `LAMBDA_MEMORY_SIZE`
 - `LAMBDA_TIMEOUT_SECONDS`
+- `LAMBDA_ALIAS_NAME`, for example `production`
+- `LAMBDA_VERSION_DESCRIPTION`, optional text appended to the deployed Lambda version/alias description for traceability
 
 The AWS account must be CDK-bootstrapped before the workflow can deploy:
 
