@@ -79,6 +79,7 @@ export class KjLinkShortenerStack extends Stack {
         minify: true,
       },
       environment: {
+        NODE_ENV: 'production',
         SHORTENER_TABLE_NAME: table.tableName,
         SHORTENER_DEFAULT_TTL_DAYS: String(default_ttl_days),
         SHORTENER_API_KEY_SECRET_ID: api_key_secret.secretName,
