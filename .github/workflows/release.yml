@@ -63,6 +63,18 @@ jobs:
         with:
           package_json_file: package.json
 
+      - name: Configure npm for GitHub Packages
+        run: |
+          set -Eeuo pipefail
+          trap 'rc=$?; echo "::error::npm config failed at line ${LINENO}: (exit ${rc})"; exit ${rc}' ERR
+
+          cat <<EOF > ~/.npmrc
+          @kaojai-ai:registry=https://npm.pkg.github.com
+          //npm.pkg.github.com/:_authToken=${NPM_AUTH_TOKEN}
+          EOF
+        env:
+          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
