@@ -162,6 +162,7 @@ export class KjLinkShortenerStack extends Stack {
     );
 
     const function_log_group = new logs.LogGroup(this, 'ShortenerFunctionLogGroup', {
+      logGroupName: `/aws/lambda/${lambda_function_name}`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.RETAIN,
     });
@@ -198,6 +199,7 @@ export class KjLinkShortenerStack extends Stack {
     table.grantReadWriteData(redirect_function);
     api_key_secret.grantRead(redirect_function);
     analytics_ip_hash_salt_secret.grantRead(redirect_function);
+    function_log_group.grantWrite(redirect_function);
     redirect_function.addToRolePolicy(new iam.PolicyStatement({
       actions: [
         'firehose:PutRecord',
