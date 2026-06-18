@@ -1,4 +1,10 @@
-import { DuplicateCodeError, type LinkExpiryUpdate, type LinkStore, type ShortLink } from './link-store.js';
+import {
+  DuplicateCodeError,
+  type LinkExpiryUpdate,
+  type LinkStore,
+  type OwnerContext,
+  type ShortLink,
+} from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import {
   generate_code,
@@ -16,6 +22,7 @@ export type CreateLinkRequest = {
   expires_at?: unknown;
   permanent?: unknown;
   force?: unknown;
+  owner_context?: unknown;
 };
 
 export type CreateLinkResult =
@@ -60,6 +67,12 @@ export async function create_short_link(
     }
   }
 
+  const owner_context_result = parse_owner_context(request.owner_context);
+
+  if (!owner_context_result.ok) {
+    return owner_context_result;
+  }
+
   const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
 
   if (custom_code) {
@@ -67,6 +80,7 @@ export async function create_short_link(
       code: custom_code,
       destination_url,
       metadata,
+      owner_context: owner_context_result.owner_context,
       force,
       expiry: expiry_result.expiry,
       now,
@@ -76,6 +90,7 @@ export async function create_short_link(
   return create_generated_link(store, {
     destination_url,
     metadata,
+    owner_context: owner_context_result.owner_context,
     force: false,
     expiry: expiry_result.expiry,
     now,
@@ -90,6 +105,7 @@ type CreateLinkFields = {
   code?: string;
   destination_url: string;
   metadata?: ShortLink['metadata'];
+  owner_context?: OwnerContext;
   force: boolean;
   expiry: LinkExpiry;
   now: Date;
@@ -158,6 +174,7 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
       code: fields.code,
       destination_url: fields.destination_url,
       ...(fields.metadata ? { metadata: fields.metadata } : {}),
+      ...(fields.owner_context ? { owner_context: fields.owner_context } : {}),
       is_permanent: true,
       now: fields.now,
     };
@@ -169,10 +186,53 @@ function build_create_input(fields: CreateLinkFields & { code: string }) {
     code: fields.code,
     destination_url: fields.destination_url,
     ...(fields.metadata ? { metadata: fields.metadata } : {}),
+    ...(fields.owner_context ? { owner_context: fields.owner_context } : {}),
     is_permanent: false,
     expires_at: expires_at.toISOString(),
     ttl_epoch_seconds: Math.floor(expires_at.getTime() / 1000),
     now: fields.now,
+  };
+}
+
+function parse_owner_context(
+  owner_context: unknown,
+): { ok: true; owner_context?: OwnerContext } | { ok: false; status_code: 400; message: string } {
+  if (owner_context === undefined || owner_context === null) {
+    return { ok: true };
+  }
+
+  if (!is_record(owner_context)) {
+    return { ok: false, status_code: 400, message: 'owner_context must be an object' };
+  }
+
+  if (
+    owner_context.source_kind !== 'booking_public_link' &&
+    owner_context.source_kind !== 'manual' &&
+    owner_context.source_kind !== 'unknown'
+  ) {
+    return { ok: false, status_code: 400, message: 'owner_context.source_kind is invalid' };
+  }
+
+  if (owner_context.tenant_id !== undefined && typeof owner_context.tenant_id !== 'string') {
+    return { ok: false, status_code: 400, message: 'owner_context.tenant_id must be a string' };
+  }
+
+  if (owner_context.source_id !== undefined && typeof owner_context.source_id !== 'string') {
+    return { ok: false, status_code: 400, message: 'owner_context.source_id must be a string' };
+  }
+
+  if (owner_context.created_by_user_id !== undefined && typeof owner_context.created_by_user_id !== 'string') {
+    return { ok: false, status_code: 400, message: 'owner_context.created_by_user_id must be a string' };
+  }
+
+  return {
+    ok: true,
+    owner_context: {
+      ...(owner_context.tenant_id ? { tenant_id: owner_context.tenant_id } : {}),
+      source_kind: owner_context.source_kind,
+      ...(owner_context.source_id ? { source_id: owner_context.source_id } : {}),
+      ...(owner_context.created_by_user_id ? { created_by_user_id: owner_context.created_by_user_id } : {}),
+    },
   };
 }
 
@@ -240,6 +300,10 @@ function parse_expiry(
       expires_at: new Date(now.getTime() + ttl_days_result.ttl_days * 24 * 60 * 60 * 1000),
     },
   };
+}
+
+function is_record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parse_expires_at(value: unknown, now: Date): { ok: true; expiry: LinkExpiry } | { ok: false; status_code: 400; message: string } {

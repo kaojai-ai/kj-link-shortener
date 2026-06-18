@@ -1,7 +1,15 @@
+export type OwnerContext = {
+  tenant_id?: string;
+  source_kind: 'booking_public_link' | 'manual' | 'unknown';
+  source_id?: string;
+  created_by_user_id?: string;
+};
+
 export type ShortLink = {
   code: string;
   destination_url: string;
   metadata?: LinkMetadata;
+  owner_context?: OwnerContext;
   created_at: string;
   updated_at: string;
   expires_at?: string;
@@ -23,6 +31,7 @@ export type CreateShortLinkInput = {
   code: string;
   destination_url: string;
   metadata?: LinkMetadata;
+  owner_context?: OwnerContext;
   expires_at?: string;
   ttl_epoch_seconds?: number;
   is_permanent: boolean;

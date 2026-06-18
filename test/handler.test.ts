@@ -1,5 +1,6 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AnalyticsContext } from '../src/analytics.js';
 import { handle_request } from '../src/handler.js';
 import { MemoryLinkStore } from './memory-link-store.js';
 
@@ -48,7 +49,7 @@ describe('handler', () => {
         body: {
           url: 'https://example.org/docs',
           code: 'docs',
-          expires_at: '2026-06-01T10:15:00.000Z',
+          expires_at: '2026-07-01T10:15:00.000Z',
         },
       }),
       store,
@@ -60,13 +61,13 @@ describe('handler', () => {
     expect(response.statusCode).toBe(201);
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       code: 'docs',
-      expires_at: '2026-06-01T10:15:00.000Z',
+      expires_at: '2026-07-01T10:15:00.000Z',
       permanent: false,
     });
 
     const link = await store.get_link('docs');
-    expect(link?.expires_at).toBe('2026-06-01T10:15:00.000Z');
-    expect(link?.ttl_epoch_seconds).toBe(Math.floor(Date.parse('2026-06-01T10:15:00.000Z') / 1000));
+    expect(link?.expires_at).toBe('2026-07-01T10:15:00.000Z');
+    expect(link?.ttl_epoch_seconds).toBe(Math.floor(Date.parse('2026-07-01T10:15:00.000Z') / 1000));
   });
 
   it('rejects create requests without the API key', async () => {
@@ -168,6 +169,75 @@ describe('handler', () => {
     expect(link?.visit_count).toBe(1);
   });
 
+  it('emits link_opened analytics for successful human redirects', async () => {
+    const store = new MemoryLinkStore();
+    const emit_event = async_event_spy();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: {
+          url: 'https://example.org/docs?utm_source=line&utm_medium=social&utm_campaign=spring-sale',
+          code: 'docs',
+          permanent: true,
+          owner_context: {
+            tenant_id: 'tenant-1',
+            source_kind: 'booking_public_link',
+            created_by_user_id: 'user-1',
+          },
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    const response = await handle_request(
+      event({
+        method: 'GET',
+        path: '/docs',
+        user_agent: 'Mozilla/5.0',
+        query_string: 'preview=false',
+        headers: {
+          referer: 'https://line.me/',
+          'x-forwarded-for': '203.0.113.10, 10.0.0.1',
+          'cloudfront-viewer-country': 'TH',
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+      {
+        emit_event,
+        ip_hash_salt: 'salt-123',
+      },
+    );
+
+    expect(response.statusCode).toBe(302);
+    expect(emit_event.calls).toHaveLength(1);
+    expect(emit_event.calls[0]).toMatchObject({
+      schema_version: 'link_opened.v1',
+      short_code: 'docs',
+      destination_url: 'https://example.org/docs?utm_source=line&utm_medium=social&utm_campaign=spring-sale',
+      tenant_id: 'tenant-1',
+      owner_source_kind: 'booking_public_link',
+      created_by_user_id: 'user-1',
+      referer: 'https://line.me/',
+      utm_source: 'line',
+      utm_medium: 'social',
+      utm_campaign: 'spring-sale',
+      user_agent: 'Mozilla/5.0',
+      request_host: 'example.com',
+      request_path: '/docs',
+      raw_query_string: 'preview=false',
+      viewer_country: 'TH',
+    });
+    expect(emit_event.calls[0]?.ip_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it('does not resolve very short link paths', async () => {
     const store = new MemoryLinkStore();
     await store.create_link({
@@ -219,6 +289,89 @@ describe('handler', () => {
 
     expect(disabled_response.statusCode).toBe(404);
     expect(missing_response.statusCode).toBe(404);
+  });
+
+  it('does not emit analytics for preview crawlers, missing links, expired links, or disabled links', async () => {
+    const store = new MemoryLinkStore();
+    const emit_event = async_event_spy();
+
+    await store.create_link({
+      code: 'docs',
+      destination_url: 'https://example.org/docs',
+      is_permanent: true,
+      now: new Date('2026-05-13T00:00:00.000Z'),
+    });
+    await store.create_link({
+      code: 'old',
+      destination_url: 'https://example.org/old',
+      is_permanent: false,
+      expires_at: '2020-01-01T00:00:00.000Z',
+      ttl_epoch_seconds: Math.floor(Date.parse('2020-01-01T00:00:00.000Z') / 1000),
+      now: new Date('2019-01-01T00:00:00.000Z'),
+    });
+    await store.create_link({
+      code: 'disabled',
+      destination_url: 'https://example.org/disabled',
+      is_permanent: true,
+      now: new Date('2026-05-13T00:00:00.000Z'),
+    });
+    await store.disable_link('disabled', new Date('2026-05-13T01:00:00.000Z'));
+
+    const analytics_context: AnalyticsContext = {
+      emit_event,
+    };
+
+    await handle_request(
+      event({ method: 'GET', path: '/docs', user_agent: 'Slackbot-LinkExpanding 1.0' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+      analytics_context,
+    );
+    await handle_request(event({ method: 'GET', path: '/missing' }), store, API_KEY, 30, no_metadata, analytics_context);
+    await handle_request(event({ method: 'GET', path: '/old' }), store, API_KEY, 30, no_metadata, analytics_context);
+    await handle_request(event({ method: 'GET', path: '/disabled' }), store, API_KEY, 30, no_metadata, analytics_context);
+
+    expect(emit_event.calls).toHaveLength(0);
+  });
+
+  it('continues redirecting when analytics emission fails', async () => {
+    const store = new MemoryLinkStore();
+    const warn_spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs', permanent: true },
+      }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    const response = await handle_request(
+      event({ method: 'GET', path: '/docs' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+      {
+        emit_event: async () => {
+          throw new Error('firehose unavailable');
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers?.location).toBe('https://example.org/docs');
+    expect(warn_spy).toHaveBeenCalledWith('link_opened_event_emit_failed', {
+      code: 'docs',
+      error: 'firehose unavailable',
+    });
   });
 
   it('returns stored metadata as preview HTML for crawler requests', async () => {
@@ -435,7 +588,7 @@ describe('handler', () => {
         method: 'POST',
         path: '/api/links',
         api_key: API_KEY,
-        body: { url: 'https://example.org/new', code: 'docs', force: true, expires_at: '2026-06-01T00:00:00.000Z' },
+        body: { url: 'https://example.org/new', code: 'docs', force: true, expires_at: '2026-07-01T00:00:00.000Z' },
       }),
       store,
       API_KEY,
@@ -450,7 +603,7 @@ describe('handler', () => {
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       code: 'docs',
       url: 'https://example.org/new',
-      expires_at: '2026-06-01T00:00:00.000Z',
+      expires_at: '2026-07-01T00:00:00.000Z',
       metadata: {
         title: 'New docs',
       },
@@ -462,7 +615,7 @@ describe('handler', () => {
     expect(redirect_response.headers?.location).toBe('https://example.org/new');
 
     const link = await store.get_link('docs');
-    expect(link?.expires_at).toBe('2026-06-01T00:00:00.000Z');
+    expect(link?.expires_at).toBe('2026-07-01T00:00:00.000Z');
   });
 });
 
@@ -472,16 +625,19 @@ function event(input: {
   api_key?: string;
   user_agent?: string;
   body?: unknown;
+  query_string?: string;
+  headers?: Record<string, string>;
 }): APIGatewayProxyEventV2 {
   return {
     version: '2.0',
     routeKey: '$default',
     rawPath: input.path,
-    rawQueryString: '',
+    rawQueryString: input.query_string ?? '',
     headers: {
       host: 'example.com',
       ...(input.user_agent ? { 'user-agent': input.user_agent } : {}),
       ...(input.api_key ? { 'x-api-key': input.api_key } : {}),
+      ...(input.headers ?? {}),
     },
     requestContext: {
       accountId: 'offline',
@@ -504,4 +660,12 @@ function event(input: {
     isBase64Encoded: false,
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
   };
+}
+
+function async_event_spy() {
+  const calls: Array<Record<string, unknown>> = [];
+
+  return Object.assign(async (event: Record<string, unknown>) => {
+    calls.push(event);
+  }, { calls });
 }

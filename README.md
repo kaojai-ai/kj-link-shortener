@@ -9,6 +9,7 @@ The project is designed to be safe as a public open-source repo. It includes reu
 - TypeScript Lambda
 - CloudFront in front of a Lambda Function URL
 - DynamoDB with TTL cleanup
+- Firehose to S3 JSONL analytics with Glue/Athena query metadata
 - AWS CDK for infrastructure
 - Private create/manage API with `x-api-key`
 
@@ -39,6 +40,23 @@ curl -X POST "https://example.com/api/links" \
   -H "content-type: application/json" \
   -H "x-api-key: $SHORTENER_API_KEY" \
   -d '{"url":"https://example.org/docs","code":"docs","permanent":true}'
+```
+
+Create a booking-owned link with tenant-ready ownership metadata:
+
+```bash
+curl -X POST "https://example.com/api/links" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $SHORTENER_API_KEY" \
+  -d '{
+    "url":"https://example.org/docs?utm_source=line&utm_medium=social&utm_campaign=spring-sale",
+    "expires_at":"2026-06-01T10:15:00.000Z",
+    "owner_context":{
+      "tenant_id":"tenant-123",
+      "source_kind":"booking_public_link",
+      "created_by_user_id":"user-456"
+    }
+  }'
 ```
 
 Upsert an existing custom code:
@@ -92,6 +110,7 @@ The create response includes the generated short URL and stored preview metadata
 - Reserved paths are `api`, `health`, `admin`, and `www`.
 - Default TTL is 30 days.
 - Create requests can use `expires_at` as an ISO 8601 timestamp instead of `ttl_days` when the link needs an exact expiration time.
+- Create requests can attach optional `owner_context` so the link can be attributed to a tenant or application workflow later.
 - Permanent links do not set a DynamoDB TTL attribute.
 - Link creation validates the URL string but does not require the destination to be fetchable.
 - Metadata fetch is best-effort and bounded; if it fails or finds nothing, the link is still created with `metadata: null`.
@@ -100,6 +119,8 @@ The create response includes the generated short URL and stored preview metadata
 - Social crawler user agents receive a small HTML preview page with stored Open Graph/Twitter tags.
 - Preview pages use the configured custom domain as their canonical and `og:url`.
 - Redirects use `302`.
+- Successful human redirects emit best-effort `link_opened.v1` analytics events to Firehose/S3.
+- Preview crawler requests do not emit redirect analytics events.
 - Missing, expired, or disabled links return `404`.
 - DynamoDB TTL eventually deletes expired items, but the Lambda checks expiry on every redirect.
 
@@ -193,10 +214,21 @@ pnpm cdk deploy \
   -c hostedZoneId=Z00000000000000000000 \
   -c certificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example \
   -c apiKeySecretName=example/link-shortener/api-key \
+  -c analyticsBucketName=example-link-shortener-analytics \
   -c lambdaFunctionName=kj-link-shortener
 ```
 
 `apiKeySecretName` points to an AWS Secrets Manager secret containing the private API key. The repo should contain only placeholder examples.
+
+`analyticsBucketName` is required. The bucket must already exist before deployment. CDK imports the bucket and does not create it.
+
+The analytics bucket can be in a different AWS region from the deployed stack. If you do this, expect cross-region data transfer costs and make sure your Athena workgroup query-results bucket is configured appropriately for the region where you run Athena queries.
+
+Optional analytics context values:
+
+- `analyticsDeliveryStreamName`: Firehose delivery stream name used by the redirect Lambda.
+- `analyticsDatabaseName`: Glue/Athena database name. Default: `kj_link_shortener_analytics`.
+- `analyticsTableName`: Glue/Athena table name. Default: `link_opened_v1`.
 
 Deployments create a Lambda alias named `production` by default and publish the latest function version to it.
 If `production` is not suitable, pass `-c lambdaAliasName=<alias-name>` when deploying.
@@ -213,10 +245,24 @@ Create these environment variables:
 - `HOSTED_ZONE_ID`: Route53 hosted zone ID.
 - `CERTIFICATE_ARN`: ACM certificate ARN in `us-east-1` for CloudFront.
 - `API_KEY_SECRET_NAME`: AWS Secrets Manager secret name or ARN containing the private API key.
+- `ANALYTICS_BUCKET_NAME`: Existing S3 bucket name for raw `link_opened.v1` events. This bucket must already exist before deployment.
 
 Create this environment secret:
 
 - `AWS_ROLE_TO_ASSUME`: IAM role ARN trusted by GitHub Actions OIDC for this repository.
+
+## Analytics Outputs
+
+Deployments now output the internal analytics resources needed for Athena and Grafana:
+
+- `ShortenerAnalyticsBucketName`
+- `ShortenerAnalyticsDeliveryStreamName`
+- `ShortenerAnalyticsDatabaseName`
+- `ShortenerAnalyticsTableName`
+
+The Glue table uses S3 partition projection over:
+
+- `link-opened/year=YYYY/month=MM/day=DD/`
 
 Optional environment variables:
 
