@@ -66,7 +66,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         env:
-          NPM_AUTH_TOKEN: ${{ github.token }}
+          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
 
       - name: Typecheck
         run: pnpm lint
