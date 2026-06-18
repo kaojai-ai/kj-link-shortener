@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  packages: read
 
 concurrency:
   group: deploy-${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
@@ -64,6 +65,8 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          NPM_AUTH_TOKEN: ${{ github.token }}
 
       - name: Typecheck
         run: pnpm lint
