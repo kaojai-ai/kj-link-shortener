@@ -36,6 +36,7 @@ export class DynamoDbLinkStore implements LinkStore {
       is_permanent: input.is_permanent,
       visit_count: 0,
       ...(input.metadata ? { metadata: input.metadata } : {}),
+      ...(input.owner_context ? { owner_context: input.owner_context } : {}),
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
       ...(input.ttl_epoch_seconds ? { ttl_epoch_seconds: input.ttl_epoch_seconds } : {}),
     };

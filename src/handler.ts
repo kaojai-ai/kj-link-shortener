@@ -2,6 +2,12 @@ import type {
   APIGatewayProxyEventV2,
   APIGatewayProxyStructuredResultV2,
 } from 'aws-lambda';
+import {
+  build_link_opened_event,
+  create_analytics_context,
+  no_op_analytics_emitter,
+  type AnalyticsContext,
+} from './analytics.js';
 import { render_admin_ui } from './admin-ui.js';
 import { load_runtime_config } from './config.js';
 import { create_short_link, fetch_metadata_safely, type CreateLinkRequest } from './create-link.js';
@@ -17,13 +23,14 @@ type Runtime = {
   store: LinkStore;
   api_key: string;
   default_ttl_days: number;
+  analytics_context: AnalyticsContext;
 };
 
 let runtime_promise: Promise<Runtime> | null = null;
 
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> {
   const runtime = await get_runtime();
-  return handle_request(event, runtime.store, runtime.api_key, runtime.default_ttl_days);
+  return handle_request(event, runtime.store, runtime.api_key, runtime.default_ttl_days, fetch_link_metadata, runtime.analytics_context);
 }
 
 export async function handle_request(
@@ -32,6 +39,7 @@ export async function handle_request(
   api_key: string,
   default_ttl_days: number,
   metadata_fetcher: MetadataFetcher = fetch_link_metadata,
+  analytics_context: AnalyticsContext = { emit_event: no_op_analytics_emitter },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const method = event.requestContext.http.method.toUpperCase();
   const path = normalize_path(event.rawPath);
@@ -73,7 +81,7 @@ export async function handle_request(
   }
 
   if (method === 'GET') {
-    return handle_redirect(event, path, link_store);
+    return handle_redirect(event, path, link_store, analytics_context);
   }
 
   return json_response(405, { error: 'Method not allowed' });
@@ -155,6 +163,7 @@ async function handle_redirect(
   event: APIGatewayProxyEventV2,
   path: string,
   link_store: LinkStore,
+  analytics_context: AnalyticsContext,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const code = decodeURIComponent(path.replace(/^\/+/, ''));
 
@@ -172,7 +181,23 @@ async function handle_redirect(
     return html_response(200, render_preview_html(link, build_short_url(event, code)));
   }
 
-  await link_store.record_visit(code, new Date());
+  const now = new Date();
+  await link_store.record_visit(code, now);
+
+  try {
+    await analytics_context.emit_event(build_link_opened_event(
+      event,
+      link,
+      now,
+      analytics_context.ip_hash_salt,
+    ));
+  } catch (error) {
+    console.warn('link_opened_event_emit_failed', {
+      code,
+      error: error instanceof Error ? error.message : 'unknown error',
+    });
+  }
+
   return redirect_response(link.destination_url);
 }
 
@@ -310,6 +335,10 @@ function get_runtime(): Promise<Runtime> {
     store: new DynamoDbLinkStore(loaded_config.table_name),
     api_key: loaded_config.api_key,
     default_ttl_days: loaded_config.default_ttl_days,
+    analytics_context: create_analytics_context({
+      delivery_stream_name: loaded_config.analytics_stream_name,
+      ip_hash_salt: loaded_config.analytics_ip_hash_salt,
+    }),
   }));
 
   return runtime_promise;

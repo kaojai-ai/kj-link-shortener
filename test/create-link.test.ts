@@ -122,6 +122,35 @@ describe('create_short_link', () => {
     }
   });
 
+  it('stores owner context when provided', async () => {
+    const store = new MemoryLinkStore();
+    const result = await create_short_link(
+      store,
+      {
+        url: 'https://example.org/docs',
+        code: 'docs',
+        owner_context: {
+          tenant_id: 'tenant-123',
+          source_kind: 'booking_public_link',
+          created_by_user_id: 'user-456',
+        },
+      },
+      30,
+      now,
+      no_metadata,
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.link.owner_context).toEqual({
+        tenant_id: 'tenant-123',
+        source_kind: 'booking_public_link',
+        created_by_user_id: 'user-456',
+      });
+    }
+  });
+
   it('rejects invalid input', async () => {
     const store = new MemoryLinkStore();
     const metadata_fetcher = vi.fn(no_metadata);
@@ -155,6 +184,16 @@ describe('create_short_link', () => {
       ok: false,
       status_code: 400,
       message: 'Code is reserved',
+    });
+    await expect(create_short_link(store, {
+      url: 'https://example.org',
+      owner_context: {
+        source_kind: 'invalid',
+      },
+    }, 30, now, metadata_fetcher)).resolves.toEqual({
+      ok: false,
+      status_code: 400,
+      message: 'owner_context.source_kind is invalid',
     });
     expect(metadata_fetcher).not.toHaveBeenCalled();
   });
