@@ -1,2 +1,7 @@
 allowBuilds:
   esbuild: false
+
+minimumReleaseAge: 0
+
+minimumReleaseAgeExclude:
+  - '@kaojai-ai/*'
