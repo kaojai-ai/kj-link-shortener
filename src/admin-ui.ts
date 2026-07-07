@@ -5,6 +5,7 @@ export function render_admin_ui(): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>KJ Link Shortener</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23ffffff'/%3E%3Crect x='4' y='4' width='56' height='56' rx='10' fill='none' stroke='%230f8a56' stroke-width='4'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='Arial,sans-serif' font-size='24' font-weight='700' fill='%230f8a56'%3EKJ%3C/text%3E%3C/svg%3E">
     <style>
       :root {
         color-scheme: light;
@@ -214,6 +215,9 @@ export function render_admin_ui(): string {
 
       .choice input {
         position: absolute;
+        width: 1px;
+        min-height: 0;
+        height: 1px;
         opacity: 0;
         pointer-events: none;
       }
@@ -580,11 +584,19 @@ export function render_admin_ui(): string {
       }
 
       .details-panel summary {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: .7rem;
+        align-items: center;
         border: 0;
         min-height: 3rem;
         padding: 0;
         background: transparent;
+        cursor: pointer;
+        list-style: none;
       }
+
+      .details-panel summary::-webkit-details-marker { display: none; }
 
       .details-body {
         display: grid;

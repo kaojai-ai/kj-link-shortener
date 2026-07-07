@@ -12,3 +12,5 @@ coverage/
 .aws/
 .cdk.context.json
 cdk.context.json
+
+tmp
