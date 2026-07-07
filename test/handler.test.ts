@@ -5,6 +5,7 @@ import { handle_request } from '../src/handler.js';
 import { MemoryLinkStore } from './memory-link-store.js';
 
 const API_KEY = 'test-api-key';
+const FUTURE_EXPIRES_AT = '2099-07-01T10:15:00.000Z';
 
 describe('handler', () => {
   const no_metadata = async () => undefined;
@@ -49,7 +50,7 @@ describe('handler', () => {
         body: {
           url: 'https://example.org/docs',
           code: 'docs',
-          expires_at: '2026-07-01T10:15:00.000Z',
+          expires_at: FUTURE_EXPIRES_AT,
         },
       }),
       store,
@@ -61,13 +62,13 @@ describe('handler', () => {
     expect(response.statusCode).toBe(201);
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       code: 'docs',
-      expires_at: '2026-07-01T10:15:00.000Z',
+      expires_at: FUTURE_EXPIRES_AT,
       permanent: false,
     });
 
     const link = await store.get_link('docs');
-    expect(link?.expires_at).toBe('2026-07-01T10:15:00.000Z');
-    expect(link?.ttl_epoch_seconds).toBe(Math.floor(Date.parse('2026-07-01T10:15:00.000Z') / 1000));
+    expect(link?.expires_at).toBe(FUTURE_EXPIRES_AT);
+    expect(link?.ttl_epoch_seconds).toBe(Math.floor(Date.parse(FUTURE_EXPIRES_AT) / 1000));
   });
 
   it('rejects create requests without the API key', async () => {
@@ -97,7 +98,10 @@ describe('handler', () => {
     expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
     expect(response.body).toContain('KJ Link Shortener');
     expect(response.body).toContain('/api/links');
-    expect(response.body).toContain('id="expires-at"');
+    expect(response.body).toContain('id="custom-path"');
+    expect(response.body).toContain('Link lifetime');
+    expect(response.body).toContain('Download QR');
+    expect(response.body).not.toContain('id="expires-at"');
   });
 
   it('redirects root path to https://kaojai.ai', async () => {
@@ -588,7 +592,7 @@ describe('handler', () => {
         method: 'POST',
         path: '/api/links',
         api_key: API_KEY,
-        body: { url: 'https://example.org/new', code: 'docs', force: true, expires_at: '2026-07-01T00:00:00.000Z' },
+        body: { url: 'https://example.org/new', code: 'docs', force: true, expires_at: FUTURE_EXPIRES_AT },
       }),
       store,
       API_KEY,
@@ -603,7 +607,7 @@ describe('handler', () => {
     expect(JSON.parse(response.body ?? '{}')).toMatchObject({
       code: 'docs',
       url: 'https://example.org/new',
-      expires_at: '2026-07-01T00:00:00.000Z',
+      expires_at: FUTURE_EXPIRES_AT,
       metadata: {
         title: 'New docs',
       },
@@ -615,7 +619,7 @@ describe('handler', () => {
     expect(redirect_response.headers?.location).toBe('https://example.org/new');
 
     const link = await store.get_link('docs');
-    expect(link?.expires_at).toBe('2026-07-01T00:00:00.000Z');
+    expect(link?.expires_at).toBe(FUTURE_EXPIRES_AT);
   });
 });
 
