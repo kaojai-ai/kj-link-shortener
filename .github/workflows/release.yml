@@ -50,28 +50,155 @@ jobs:
   deploy:
     name: Deploy production Lambda
     needs: verify_terraform_ownership
-    uses: kaojai-ai/dev-tools/.github/workflows/deploy-lambda-code.yml@main
+    runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: read
       packages: read
       id-token: write
-    secrets:
-      npm_auth_token: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
-      KJPROD_AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-      GRAFANA_TOKEN_FOR_GITHUB: ${{ secrets.GRAFANA_TOKEN_FOR_GITHUB }}
-    with:
-      environment: production
-      app_directory: .
-      entry: src/runtime-handler.ts
-      function_name: kj-link-shortener
-      function_alias: production
-      sanitize_environment: true
-      aws_region: ap-southeast-1
-      service_name: kj-link-shortener
-      function_url_health_path: /health
-      function_url_health_mode: http_2xx
-      node_version: "20"
+    env:
+      FUNCTION_NAME: kj-link-shortener
+      FUNCTION_ALIAS: production
+      AWS_REGION: ap-southeast-1
+      NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.0.8 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Configure npm
+        run: |
+          npm config set @kaojai-ai:registry https://npm.pkg.github.com
+          npm config set //npm.pkg.github.com/:_authToken "${NPM_AUTH_TOKEN}"
+
+      - name: Install and verify
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ap-southeast-1
+
+      - name: Build Lambda artifact
+        id: build
+        run: |
+          set -Eeuo pipefail
+
+          service_version="$(jq -r '.version' package.json)+sha.${GITHUB_SHA::7}.run.${GITHUB_RUN_NUMBER}"
+          service_version_json="$(jq -cn --arg value "${service_version}" '$value')"
+          rm -rf .lambda-artifact lambda.zip
+          mkdir .lambda-artifact
+          pnpm exec esbuild src/runtime-handler.ts \
+            --bundle \
+            --platform=node \
+            --target=node20 \
+            --format=cjs \
+            --sourcemap \
+            --outfile=.lambda-artifact/index.js \
+            "--banner:js=process.env.SERVICE_VERSION = ${service_version_json};"
+          cp package.json .lambda-artifact/package.json
+          (cd .lambda-artifact && zip -qr ../lambda.zip .)
+
+          artifact_sha256="$(openssl dgst -sha256 -binary lambda.zip | openssl base64 -A)"
+          echo "service_version=${service_version}" >> "$GITHUB_OUTPUT"
+          echo "artifact_sha256=${artifact_sha256}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish, move alias, and verify
+        env:
+          EXPECTED_ARTIFACT_SHA256: ${{ steps.build.outputs.artifact_sha256 }}
+        run: |
+          set -Eeuo pipefail
+
+          previous_version="$(aws lambda get-alias \
+            --function-name "${FUNCTION_NAME}" \
+            --name "${FUNCTION_ALIAS}" \
+            --query FunctionVersion \
+            --output text)"
+          alias_moved=false
+
+          rollback_alias() {
+            if [ "${alias_moved}" = true ]; then
+              echo "::error::Verification failed; rolling ${FUNCTION_ALIAS} back to ${previous_version}"
+              aws lambda update-alias \
+                --function-name "${FUNCTION_NAME}" \
+                --name "${FUNCTION_ALIAS}" \
+                --function-version "${previous_version}" \
+                >/dev/null
+            fi
+          }
+          trap rollback_alias ERR
+
+          aws lambda wait function-updated --function-name "${FUNCTION_NAME}"
+          update_result="$(aws lambda update-function-code \
+            --function-name "${FUNCTION_NAME}" \
+            --zip-file fileb://lambda.zip \
+            --output json)"
+          updated_sha256="$(jq -r '.CodeSha256' <<<"${update_result}")"
+          [ "${updated_sha256}" = "${EXPECTED_ARTIFACT_SHA256}" ]
+          aws lambda wait function-updated --function-name "${FUNCTION_NAME}"
+
+          aws lambda update-function-configuration \
+            --function-name "${FUNCTION_NAME}" \
+            --environment 'Variables={KJ_RUNTIME_ENVIRONMENT=production}' \
+            >/dev/null
+          aws lambda wait function-updated --function-name "${FUNCTION_NAME}"
+
+          publish_result="$(aws lambda publish-version \
+            --function-name "${FUNCTION_NAME}" \
+            --output json)"
+          published_version="$(jq -r '.Version' <<<"${publish_result}")"
+          published_sha256="$(jq -r '.CodeSha256' <<<"${publish_result}")"
+          [ "${published_sha256}" = "${EXPECTED_ARTIFACT_SHA256}" ]
+          aws lambda wait function-updated --function-name "${FUNCTION_NAME}"
+
+          aws lambda update-alias \
+            --function-name "${FUNCTION_NAME}" \
+            --name "${FUNCTION_ALIAS}" \
+            --function-version "${published_version}" \
+            >/dev/null
+          alias_moved=true
+
+          deployed_sha256="$(aws lambda get-function \
+            --function-name "${FUNCTION_NAME}" \
+            --qualifier "${FUNCTION_ALIAS}" \
+            --query Configuration.CodeSha256 \
+            --output text)"
+          [ "${deployed_sha256}" = "${EXPECTED_ARTIFACT_SHA256}" ]
+
+          function_url="$(aws lambda get-function-url-config \
+            --function-name "${FUNCTION_NAME}" \
+            --qualifier "${FUNCTION_ALIAS}" \
+            --query FunctionUrl \
+            --output text)"
+          health_url="${function_url%/}/health"
+          for attempt in $(seq 1 12); do
+            if curl --silent --show-error --fail "${health_url}" >/dev/null; then
+              trap - ERR
+              echo "Deployed ${FUNCTION_NAME}:${FUNCTION_ALIAS} version ${published_version}"
+              exit 0
+            fi
+            echo "Health check attempt ${attempt}/12 failed"
+            sleep 5
+          done
+
+          echo "::error::Function URL health check failed"
+          rollback_alias
+          exit 1
 
   prune_versions:
     name: Prune old Lambda versions
