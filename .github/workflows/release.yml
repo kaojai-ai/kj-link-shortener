@@ -107,7 +107,7 @@ jobs:
             --bundle \
             --platform=node \
             --target=node20 \
-            --format=cjs \
+            --format=esm \
             --sourcemap \
             --outfile=.lambda-artifact/index.js \
             "--banner:js=process.env.SERVICE_VERSION = ${service_version_json};"
