@@ -205,14 +205,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Checkout dev-tools deploy helpers
-        uses: actions/checkout@v6
-        with:
-          repository: kaojai-ai/dev-tools
-          ref: main
-          path: .dev-tools
-          token: ${{ secrets.BYPASS_DEPLOYMENT_GITHUB_TOKEN || github.token }}
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -221,8 +213,42 @@ jobs:
 
       - name: Prune
         run: |
-          node .dev-tools/.github/scripts/prune-lambda-versions.mjs \
-            --function-name kj-link-shortener \
-            --region ap-southeast-1 \
-            --retain-count 10 \
-            --retain-days 14
+          set -Eeuo pipefail
+
+          function_name=kj-link-shortener
+          region=ap-southeast-1
+          retain_count=10
+          cutoff_epoch="$(date -u -d '14 days ago' +%s)"
+          alias_versions=" $(aws lambda list-aliases \
+            --function-name "${function_name}" \
+            --region "${region}" \
+            --query 'Aliases[].FunctionVersion' \
+            --output text) "
+
+          mapfile -t versions < <(aws lambda list-versions-by-function \
+            --function-name "${function_name}" \
+            --region "${region}" \
+            --query 'Versions[].[Version,LastModified]' \
+            --output text | sort -rn -k1,1)
+
+          published_index=0
+          for entry in "${versions[@]}"; do
+            read -r version last_modified <<<"${entry}"
+            if [ "${version}" = '$LATEST' ]; then
+              continue
+            fi
+
+            published_index=$((published_index + 1))
+            modified_epoch="$(date -u -d "${last_modified}" +%s)"
+            if [ "${published_index}" -le "${retain_count}" ] \
+              || [ "${modified_epoch}" -ge "${cutoff_epoch}" ] \
+              || [[ "${alias_versions}" == *" ${version} "* ]]; then
+              continue
+            fi
+
+            echo "Deleting old Lambda version ${function_name}:${version}"
+            aws lambda delete-function \
+              --function-name "${function_name}" \
+              --qualifier "${version}" \
+              --region "${region}"
+          done
