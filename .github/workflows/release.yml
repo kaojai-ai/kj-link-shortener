@@ -107,11 +107,10 @@ jobs:
             --bundle \
             --platform=node \
             --target=node20 \
-            --format=esm \
+            --format=cjs \
             --sourcemap \
             --outfile=.lambda-artifact/index.js \
             "--banner:js=process.env.SERVICE_VERSION = ${service_version_json};"
-          cp package.json .lambda-artifact/package.json
           (cd .lambda-artifact && zip -qr ../lambda.zip .)
 
           artifact_sha256="$(openssl dgst -sha256 -binary lambda.zip | openssl base64 -A)"
