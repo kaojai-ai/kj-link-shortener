@@ -1,12 +1,7 @@
-name: Deploy
+name: Deploy Terraform-Owned Lambda
 
 on:
   workflow_dispatch:
-    inputs:
-      stack_name:
-        description: CDK stack name to deploy
-        required: false
-        default: KjLinkShortenerStack
 
 permissions:
   contents: read
@@ -14,141 +9,94 @@ permissions:
   packages: read
 
 concurrency:
-  group: deploy-${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
+  group: deploy-kj-link-shortener-production
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy to AWS
+  verify_terraform_ownership:
+    name: Verify Terraform ownership
     runs-on: ubuntu-latest
     environment: production
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate deployment config
-        run: |
-          missing=0
-          for name in AWS_REGION DOMAIN_NAME HOSTED_ZONE_DOMAIN HOSTED_ZONE_ID CERTIFICATE_ARN API_KEY_SECRET_NAME ANALYTICS_BUCKET_NAME; do
-            if [ -z "${!name}" ]; then
-              echo "::error::$name is required"
-              missing=1
-            fi
-          done
-
-          if [ -z "$AWS_ROLE_TO_ASSUME" ]; then
-            echo "::error::AWS_ROLE_TO_ASSUME is required"
-            missing=1
-          fi
-
-          exit "$missing"
-        env:
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
-          HOSTED_ZONE_DOMAIN: ${{ vars.HOSTED_ZONE_DOMAIN }}
-          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
-          CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
-          API_KEY_SECRET_NAME: ${{ vars.API_KEY_SECRET_NAME }}
-          ANALYTICS_BUCKET_NAME: ${{ vars.ANALYTICS_BUCKET_NAME }}
-          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          package_json_file: package.json
-
-      - name: Configure npm for GitHub Packages
-        run: |
-          set -Eeuo pipefail
-          trap 'rc=$?; echo "::error::npm config failed at line ${LINENO}: (exit ${rc})"; exit ${rc}' ERR
-
-          cat <<EOF > ~/.npmrc
-          @kaojai-ai:registry=https://npm.pkg.github.com
-          //npm.pkg.github.com/:_authToken=${NPM_AUTH_TOKEN}
-          EOF
-        env:
-          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
-
-      - name: Typecheck
-        run: pnpm lint
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
-
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ap-southeast-1
 
-      - name: Deploy CDK stack
+      - name: Refuse CloudFormation-owned deployment
         run: |
-          args=(
-            "$STACK_NAME"
-            "--require-approval" "never"
-            "-c" "domainName=$DOMAIN_NAME"
-            "-c" "hostedZoneDomain=$HOSTED_ZONE_DOMAIN"
-            "-c" "hostedZoneId=$HOSTED_ZONE_ID"
-            "-c" "certificateArn=$CERTIFICATE_ARN"
-            "-c" "apiKeySecretName=$API_KEY_SECRET_NAME"
-            "-c" "analyticsBucketName=$ANALYTICS_BUCKET_NAME"
-          )
+          set -Eeuo pipefail
 
-          if [ -n "$DEFAULT_TTL_DAYS" ]; then
-            args+=("-c" "defaultTtlDays=$DEFAULT_TTL_DAYS")
+          if aws cloudformation describe-stacks \
+            --stack-name KjLinkShortenerStack \
+            --region ap-southeast-1 \
+            >/dev/null 2>&1; then
+            echo "::error::KjLinkShortenerStack still exists; complete the Terraform takeover before deploying code"
+            exit 1
           fi
 
-          if [ -n "$TABLE_NAME" ]; then
-            args+=("-c" "tableName=$TABLE_NAME")
-          fi
+          role_name="$(aws lambda get-function-configuration \
+            --function-name kj-link-shortener \
+            --region ap-southeast-1 \
+            --query 'Role' \
+            --output text | awk -F/ '{print $NF}')"
 
-          if [ -n "$LAMBDA_FUNCTION_NAME" ]; then
-            args+=("-c" "lambdaFunctionName=$LAMBDA_FUNCTION_NAME")
-          fi
+          aws iam get-role-policy \
+            --role-name "${role_name}" \
+            --policy-name kj-app-runtime-config-read \
+            >/dev/null
 
-          if [ -n "$LAMBDA_MEMORY_SIZE" ]; then
-            args+=("-c" "lambdaMemorySize=$LAMBDA_MEMORY_SIZE")
-          fi
+  deploy:
+    name: Deploy production Lambda
+    needs: verify_terraform_ownership
+    uses: kaojai-ai/dev-tools/.github/workflows/deploy-lambda-code.yml@main
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    secrets:
+      npm_auth_token: ${{ secrets.NPM_TOKEN_GITHUB || secrets.NPM_AUTH_TOKEN || github.token }}
+      KJPROD_AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      GRAFANA_TOKEN_FOR_GITHUB: ${{ secrets.GRAFANA_TOKEN_FOR_GITHUB }}
+    with:
+      environment: production
+      app_directory: .
+      entry: src/runtime-handler.ts
+      function_name: kj-link-shortener
+      function_alias: production
+      sanitize_environment: true
+      aws_region: ap-southeast-1
+      service_name: kj-link-shortener
+      function_url_health_path: /health
+      function_url_health_mode: http_2xx
+      node_version: "20"
 
-          if [ -n "$LAMBDA_TIMEOUT_SECONDS" ]; then
-            args+=("-c" "lambdaTimeoutSeconds=$LAMBDA_TIMEOUT_SECONDS")
-          fi
+  prune_versions:
+    name: Prune old Lambda versions
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout dev-tools deploy helpers
+        uses: actions/checkout@v6
+        with:
+          repository: kaojai-ai/dev-tools
+          ref: main
+          path: .dev-tools
+          token: ${{ secrets.BYPASS_DEPLOYMENT_GITHUB_TOKEN || github.token }}
 
-          if [ -n "$LAMBDA_ALIAS_NAME" ]; then
-            args+=("-c" "lambdaAliasName=$LAMBDA_ALIAS_NAME")
-          fi
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ap-southeast-1
 
-          if [ -n "$LAMBDA_VERSION_DESCRIPTION" ]; then
-            args+=("-c" "lambdaVersionDescription=$LAMBDA_VERSION_DESCRIPTION")
-          fi
-
-          pnpm cdk deploy "${args[@]}"
-        env:
-          STACK_NAME: ${{ github.event.inputs.stack_name || 'KjLinkShortenerStack' }}
-          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
-          HOSTED_ZONE_DOMAIN: ${{ vars.HOSTED_ZONE_DOMAIN }}
-          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
-          CERTIFICATE_ARN: ${{ vars.CERTIFICATE_ARN }}
-          API_KEY_SECRET_NAME: ${{ vars.API_KEY_SECRET_NAME }}
-          ANALYTICS_BUCKET_NAME: ${{ vars.ANALYTICS_BUCKET_NAME }}
-          DEFAULT_TTL_DAYS: ${{ vars.DEFAULT_TTL_DAYS }}
-          TABLE_NAME: ${{ vars.TABLE_NAME }}
-          LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
-          LAMBDA_MEMORY_SIZE: ${{ vars.LAMBDA_MEMORY_SIZE }}
-          LAMBDA_TIMEOUT_SECONDS: ${{ vars.LAMBDA_TIMEOUT_SECONDS }}
-          LAMBDA_ALIAS_NAME: ${{ vars.LAMBDA_ALIAS_NAME }}
-          LAMBDA_VERSION_DESCRIPTION: ${{ format('run {0} ({1})', github.run_number, github.sha) }}
+      - name: Prune
+        run: |
+          node .dev-tools/.github/scripts/prune-lambda-versions.mjs \
+            --function-name kj-link-shortener \
+            --region ap-southeast-1 \
+            --retain-count 10 \
+            --retain-days 14

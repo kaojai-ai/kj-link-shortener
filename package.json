@@ -17,9 +17,8 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.972.0",
     "@aws-sdk/client-firehose": "^3.1070.0",
-    "@aws-sdk/client-secrets-manager": "^3.972.0",
     "@aws-sdk/lib-dynamodb": "^3.972.0",
-    "@kaojai-ai/platform-lib": "^0.1.74"
+    "@kaojai-ai/platform-lib": "0.1.120"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.147",

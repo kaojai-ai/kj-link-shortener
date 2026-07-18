@@ -208,6 +208,7 @@ export class KjLinkShortenerStack extends Stack {
       resources: [analytics_delivery_stream.attrArn],
     }));
 
+    redirect_function.currentVersion.applyRemovalPolicy(RemovalPolicy.RETAIN);
     const function_alias = redirect_function.addAlias(lambda_alias_name, {
       description: lambda_version_description,
     });

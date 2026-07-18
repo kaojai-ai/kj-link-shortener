@@ -10,7 +10,7 @@ The project is designed to be safe as a public open-source repo. It includes reu
 - CloudFront in front of a Lambda Function URL
 - DynamoDB with TTL cleanup
 - Firehose to S3 JSONL analytics with Glue/Athena query metadata
-- AWS CDK for infrastructure
+- Terraform-owned infrastructure
 - Private create/manage API with `x-api-key`
 
 ## API
@@ -203,49 +203,20 @@ Useful breakpoint files:
 - `src/create-link.ts`: create/upsert behavior.
 - `src/metadata.ts`: metadata fetch behavior.
 
-## Deploy
+## Runtime configuration
 
-Deploys require AWS credentials and CDK context values supplied from your shell, CI secrets, or ignored local config.
+Production infrastructure is owned by the KaoJai `infra` Terraform stack. The Lambda loads configuration at cold start from:
 
-```bash
-pnpm cdk deploy \
-  -c domainName=example.com \
-  -c hostedZoneDomain=example.com \
-  -c hostedZoneId=Z00000000000000000000 \
-  -c certificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example \
-  -c apiKeySecretName=example/link-shortener/api-key \
-  -c analyticsBucketName=example-link-shortener-analytics \
-  -c lambdaFunctionName=kj-link-shortener
-```
+- SSM `/kj/production/apps/kj-link-shortener/config/*` for table, stream, TTL, and public URL.
+- Secrets Manager `/kj/production/all/secrets` for `KJ_LINK_SHORTENER_API_KEY` and `KJ_LINK_SHORTENER_ANALYTICS_IP_HASH_SALT`.
 
-`apiKeySecretName` points to an AWS Secrets Manager secret containing the private API key. The repo should contain only placeholder examples.
-
-`analyticsBucketName` is required. The bucket must already exist before deployment. CDK imports the bucket and does not create it.
-
-The analytics bucket can be in a different AWS region from the deployed stack. If you do this, expect cross-region data transfer costs and make sure your Athena workgroup query-results bucket is configured appropriately for the region where you run Athena queries.
-
-Optional analytics context values:
-
-- `analyticsDeliveryStreamName`: Firehose delivery stream name used by the redirect Lambda.
-- `analyticsDatabaseName`: Glue/Athena database name. Default: `kj_link_shortener_analytics`.
-- `analyticsTableName`: Glue/Athena table name. Default: `link_opened_v1`.
-
-Deployments create a Lambda alias named `production` by default and publish the latest function version to it.
-If `production` is not suitable, pass `-c lambdaAliasName=<alias-name>` when deploying.
+Only `KJ_RUNTIME_ENVIRONMENT=production` is stored directly in the Lambda environment.
 
 ## GitHub Actions Deploy
 
-The deploy workflow is manual only and reads production values from the GitHub `production` environment. Do not commit real deployment values.
+The manual deploy workflow builds the runtime bootstrap artifact, publishes an immutable Lambda version, moves the Terraform-owned `production` alias, checks `/health`, and prunes old versions.
 
-Create these environment variables:
-
-- `AWS_REGION`: AWS region for Lambda and DynamoDB, for example `ap-southeast-1`.
-- `DOMAIN_NAME`: public shortener domain, for example `example.com`.
-- `HOSTED_ZONE_DOMAIN`: Route53 hosted zone domain, for example `example.com`.
-- `HOSTED_ZONE_ID`: Route53 hosted zone ID.
-- `CERTIFICATE_ARN`: ACM certificate ARN in `us-east-1` for CloudFront.
-- `API_KEY_SECRET_NAME`: AWS Secrets Manager secret name or ARN containing the private API key.
-- `ANALYTICS_BUCKET_NAME`: Existing S3 bucket name for raw `link_opened.v1` events. This bucket must already exist before deployment.
+It refuses to deploy while `KjLinkShortenerStack` still exists in CloudFormation or while the Lambda role lacks canonical runtime-config access.
 
 Create this environment secret:
 
@@ -264,22 +235,6 @@ The Glue table uses S3 partition projection over:
 
 - `link-opened/year=YYYY/month=MM/day=DD/`
 
-Optional environment variables:
-
-- `DEFAULT_TTL_DAYS`
-- `TABLE_NAME`
-- `LAMBDA_FUNCTION_NAME`, for example `kj-link-shortener`
-- `LAMBDA_MEMORY_SIZE`
-- `LAMBDA_TIMEOUT_SECONDS`
-- `LAMBDA_ALIAS_NAME`, for example `production`
-- `LAMBDA_VERSION_DESCRIPTION`, optional text appended to the deployed Lambda version/alias description for traceability
-
-The AWS account must be CDK-bootstrapped before the workflow can deploy:
-
-```bash
-pnpm cdk bootstrap aws://ACCOUNT_ID/AWS_REGION
-```
-
 Then run **Actions > Deploy > Run workflow**.
 
 ## Operator UI
@@ -292,22 +247,6 @@ The UI is intentionally public-safe:
 - It calls same-origin private API routes with `x-api-key`.
 - It supports create, custom code, TTL, exact expiration timestamps, permanent links, forced upsert, and URL updates.
 - No production domain, AWS account value, or API key is committed.
-
-## Required CDK Context
-
-- `domainName`: custom domain for redirects and API, for example `example.com`.
-- `hostedZoneDomain`: Route53 hosted zone domain, for example `example.com`.
-- `hostedZoneId`: Route53 hosted zone ID. Supply this from local ignored config or CI secrets.
-- `certificateArn`: ACM certificate ARN in `us-east-1` for CloudFront.
-- `apiKeySecretName`: Secrets Manager secret name or ARN containing the create/manage API key.
-
-Optional context:
-
-- `defaultTtlDays`: default TTL in days, default `30`.
-- `tableName`: DynamoDB table name.
-- `lambdaFunctionName`: Lambda function name.
-- `lambdaMemorySize`: Lambda memory in MB, default `256`.
-- `lambdaTimeoutSeconds`: Lambda timeout, default `10`.
 
 ## Public Repo Safety
 
