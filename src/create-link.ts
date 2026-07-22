@@ -49,7 +49,7 @@ export async function create_short_link(
 
   const permanent = request.permanent === true;
   const force = request.force === true;
-  const expiry_result = parse_expiry(request, default_ttl_days, now);
+  const expiry_result = parse_link_expiry(request, default_ttl_days, now);
 
   if (!expiry_result.ok) {
     return expiry_result;
@@ -131,7 +131,7 @@ async function create_custom_link(store: LinkStore, fields: CreateLinkFields & {
           fields.destination_url,
           fields.metadata,
           fields.now,
-          build_expiry_update(fields.expiry),
+          to_link_expiry_update(fields.expiry),
         );
 
         if (link) {
@@ -236,7 +236,7 @@ function parse_owner_context(
   };
 }
 
-function build_expiry_update(expiry: LinkExpiry): LinkExpiryUpdate {
+export function to_link_expiry_update(expiry: LinkExpiry): LinkExpiryUpdate {
   if (expiry.is_permanent) {
     return {
       is_permanent: true,
@@ -266,7 +266,7 @@ export async function fetch_metadata_safely(
   }
 }
 
-function parse_expiry(
+export function parse_link_expiry(
   request: CreateLinkRequest,
   default_ttl_days: number,
   now: Date,

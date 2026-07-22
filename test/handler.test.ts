@@ -101,7 +101,37 @@ describe('handler', () => {
     expect(response.body).toContain('id="custom-path"');
     expect(response.body).toContain('Link lifetime');
     expect(response.body).toContain('Download QR');
+    expect(response.body).toContain('Last 20 generated URLs');
+    expect(response.body).toContain('id="recent-links-body"');
+    expect(response.body).toContain('select_link_for_edit');
     expect(response.body).not.toContain('id="expires-at"');
+  });
+
+  it('lists the 20 most recently generated links through the private API', async () => {
+    const store = new MemoryLinkStore();
+
+    for (let index = 0; index < 21; index += 1) {
+      await store.create_link({
+        code: `link-${index}`,
+        destination_url: `https://example.org/${index}`,
+        is_permanent: true,
+        now: new Date(`2026-05-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`),
+      });
+    }
+
+    const response = await handle_request(
+      event({ method: 'GET', path: '/api/links', api_key: API_KEY }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+    const body = JSON.parse(response.body ?? '{}');
+
+    expect(response.statusCode).toBe(200);
+    expect(body.links).toHaveLength(20);
+    expect(body.links[0]).toMatchObject({ code: 'link-20', short_url: 'https://example.com/link-20' });
+    expect(body.links.at(-1)).toMatchObject({ code: 'link-1' });
   });
 
   it('redirects root path to https://kaojai.ai', async () => {
@@ -466,6 +496,7 @@ describe('handler', () => {
         api_key: API_KEY,
         body: {
           url: 'https://example.org/new-docs',
+          permanent: true,
         },
       }),
       store,
@@ -484,6 +515,7 @@ describe('handler', () => {
         title: 'New docs',
         fetched_at: '2026-05-13T01:00:00.000Z',
       },
+      permanent: true,
     });
 
     const redirect_response = await handle_request(event({ method: 'GET', path: '/docs' }), store, API_KEY, 30, no_metadata);
