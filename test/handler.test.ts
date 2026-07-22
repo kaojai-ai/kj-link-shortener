@@ -104,6 +104,8 @@ describe('handler', () => {
     expect(response.body).toContain('Last 20 generated URLs');
     expect(response.body).toContain('id="recent-links-body"');
     expect(response.body).toContain('select_link_for_edit');
+    expect(response.body).toContain('id="token-gate"');
+    expect(response.body).toContain('id="app-content" hidden');
     expect(response.body).not.toContain('id="expires-at"');
   });
 
@@ -134,7 +136,7 @@ describe('handler', () => {
     expect(body.links.at(-1)).toMatchObject({ code: 'link-1' });
   });
 
-  it('redirects root path to https://kaojai.ai', async () => {
+  it('serves the token-gated operator UI at root', async () => {
     const store = new MemoryLinkStore();
     const response = await handle_request(
       event({ method: 'GET', path: '/' }),
@@ -144,8 +146,9 @@ describe('handler', () => {
       no_metadata,
     );
 
-    expect(response.statusCode).toBe(302);
-    expect(response.headers?.Location).toBe('https://kaojai.ai');
+    expect(response.statusCode).toBe(200);
+    expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
+    expect(response.body).toContain('Enter API token');
   });
 
   it('allows all crawlers through robots.txt', async () => {

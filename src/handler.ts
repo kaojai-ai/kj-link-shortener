@@ -50,18 +50,8 @@ export async function handle_request(
   const method = event.requestContext.http.method.toUpperCase();
   const path = normalize_path(event.rawPath);
 
-  if (method === 'GET' && (path === '/web' || path === '/web/')) {
+  if (method === 'GET' && (path === '/' || path === '/web' || path === '/web/')) {
     return html_response(200, render_admin_ui());
-  }
-
-  if (method === 'GET' && path === '/') {
-    return {
-      statusCode: 302,
-      headers: {
-        Location: 'https://kaojai.ai',
-      },
-      body: '',
-    };
   }
 
   if (method === 'GET' && path === '/health') {
