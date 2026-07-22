@@ -409,8 +409,6 @@ export function render_admin_ui(): string {
         padding: 1.65rem;
       }
 
-      .token-gate h2 { margin: 0; font-size: 1.25rem; }
-      .token-gate p { margin: .45rem 0 1.1rem; color: var(--muted); line-height: 1.45; }
       .token-form { display: grid; gap: .85rem; }
       .token-button { min-height: 3.4rem; }
 
@@ -862,17 +860,8 @@ export function render_admin_ui(): string {
   </head>
   <body>
     <main class="page-shell">
-      <header class="brand" aria-label="KJ Link Shortener">
-        <div class="brand-mark" aria-hidden="true">KJ</div>
-        <h1>KJ Link Shortener</h1>
-      </header>
-
       <section id="token-gate" class="panel token-gate" aria-label="API token">
         <form id="token-form" class="token-form">
-          <div>
-            <h2>Enter API token</h2>
-            <p>Enter your token to manage short links.</p>
-          </div>
           <label class="field">
             <span class="input-shell">
               <span class="input-icon" aria-hidden="true">
@@ -887,6 +876,11 @@ export function render_admin_ui(): string {
       </section>
 
       <div id="app-content" hidden>
+      <header class="brand" aria-label="KJ Link Shortener">
+        <div class="brand-mark" aria-hidden="true">KJ</div>
+        <h1>KJ Link Shortener</h1>
+      </header>
+
       <div class="workspace">
         <section class="panel creator-panel" aria-label="Create short link">
           <form id="link-form" class="form">
