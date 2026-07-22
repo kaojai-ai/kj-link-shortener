@@ -370,7 +370,7 @@ export function render_admin_ui(): string {
       .primary-button {
         min-height: 4.1rem;
         width: 100%;
-        margin-top: 5.7rem;
+        margin-top: 0;
         color: #fff;
         background: linear-gradient(180deg, #11945d 0%, #087545 100%);
         font-size: 1.02rem;
@@ -402,6 +402,17 @@ export function render_admin_ui(): string {
         margin-top: 1.35rem;
         padding: 1.45rem;
       }
+
+      .token-gate {
+        width: min(28rem, 100%);
+        margin: 6vh auto 0;
+        padding: 1.65rem;
+      }
+
+      .token-gate h2 { margin: 0; font-size: 1.25rem; }
+      .token-gate p { margin: .45rem 0 1.1rem; color: var(--muted); line-height: 1.45; }
+      .token-form { display: grid; gap: .85rem; }
+      .token-button { min-height: 3.4rem; }
 
       .recent-heading {
         display: flex;
@@ -856,6 +867,26 @@ export function render_admin_ui(): string {
         <h1>KJ Link Shortener</h1>
       </header>
 
+      <section id="token-gate" class="panel token-gate" aria-label="API token">
+        <form id="token-form" class="token-form">
+          <div>
+            <h2>Enter API token</h2>
+            <p>Enter your token to manage short links.</p>
+          </div>
+          <label class="field">
+            <span class="input-shell">
+              <span class="input-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M15 7.5a4.5 4.5 0 1 0 1.5 8.74L18 18h2v2h2v-3.5l-3.26-3.26A4.5 4.5 0 0 0 15 7.5ZM15 11h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <input id="api-key" type="password" autocomplete="off" placeholder="API token" required>
+            </span>
+          </label>
+          <p id="token-status" class="status-message" aria-live="polite"></p>
+          <button id="token-submit" class="primary-button token-button" type="submit">Continue</button>
+        </form>
+      </section>
+
+      <div id="app-content" hidden>
       <div class="workspace">
         <section class="panel creator-panel" aria-label="Create short link">
           <form id="link-form" class="form">
@@ -904,33 +935,6 @@ export function render_admin_ui(): string {
                 </label>
               </div>
             </fieldset>
-
-            <details id="api-key-details" class="disclosure api-key-disclosure" open>
-              <summary>
-                <svg class="details-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                  <path d="M7 11V8a5 5 0 0 1 10 0v3M6.5 11h11A1.5 1.5 0 0 1 19 12.5v6A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5v-6A1.5 1.5 0 0 1 6.5 11Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span class="summary-text">
-                  <span class="summary-title">API key</span>
-                  <span id="api-key-state" class="summary-state">Required</span>
-                </span>
-                <svg class="chevron" aria-hidden="true" viewBox="0 0 24 24" fill="none">
-                  <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </summary>
-              <div class="api-key-body">
-                <label class="field">
-                  <span class="input-shell">
-                    <span class="input-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M15 7.5a4.5 4.5 0 1 0 1.5 8.74L18 18h2v2h2v-3.5l-3.26-3.26A4.5 4.5 0 0 0 15 7.5ZM15 11h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </span>
-                    <input id="api-key" type="password" autocomplete="off" placeholder="Stored only in this browser" required>
-                  </span>
-                </label>
-              </div>
-            </details>
 
             <p id="status-message" class="status-message" aria-live="polite"></p>
 
@@ -1031,18 +1035,22 @@ export function render_admin_ui(): string {
           </table>
         </div>
       </section>
+      </div>
     </main>
 
     <script>
       const form = document.querySelector('#link-form');
+      const token_form = document.querySelector('#token-form');
+      const token_gate = document.querySelector('#token-gate');
+      const app_content = document.querySelector('#app-content');
       const destination_url = document.querySelector('#destination-url');
       const custom_path = document.querySelector('#custom-path');
       const path_prefix = document.querySelector('#path-prefix');
       const lifetime_ttl = document.querySelector('#lifetime-ttl');
       const lifetime_permanent = document.querySelector('#lifetime-permanent');
-      const api_key_details = document.querySelector('#api-key-details');
-      const api_key_state = document.querySelector('#api-key-state');
       const api_key = document.querySelector('#api-key');
+      const token_submit = document.querySelector('#token-submit');
+      const token_status = document.querySelector('#token-status');
       const submit_button = document.querySelector('#submit-button');
       const status_message = document.querySelector('#status-message');
       const empty_state = document.querySelector('#empty-state');
@@ -1075,20 +1083,16 @@ export function render_admin_ui(): string {
 
       path_prefix.textContent = location.origin + '/';
       api_key.value = localStorage.getItem(storage_key) || '';
-      sync_api_key_state(true);
-      if (api_key.value.trim()) void load_recent_links();
+      if (api_key.value.trim()) void unlock();
+
+      token_form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        await unlock();
+      });
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         await submit_link();
-      });
-
-      api_key.addEventListener('input', () => {
-        sync_api_key_state(false);
-      });
-
-      api_key.addEventListener('change', () => {
-        void load_recent_links();
       });
 
       destination_url.addEventListener('input', () => {
@@ -1147,8 +1151,6 @@ export function render_admin_ui(): string {
       }
 
       async function request_api(path, options) {
-        localStorage.setItem(storage_key, api_key.value);
-        sync_api_key_state(true);
         set_busy(true);
         set_status(editing_code ? 'Saving link...' : 'Creating short link...', '');
 
@@ -1224,7 +1226,7 @@ export function render_admin_ui(): string {
       }
 
       async function load_recent_links() {
-        if (!api_key.value.trim()) return;
+        if (!api_key.value.trim()) return false;
 
         try {
           const response = await fetch('/api/links', {
@@ -1234,14 +1236,40 @@ export function render_admin_ui(): string {
 
           if (!response.ok) {
             recent_links_body.replaceChildren(recent_empty_row(body.error || 'Recent links could not be loaded.'));
-            return;
+            return false;
           }
 
           recent_links = Array.isArray(body.links) ? body.links : [];
           render_recent_links();
+          return true;
         } catch {
           recent_links_body.replaceChildren(recent_empty_row('Recent links could not be loaded.'));
+          return false;
         }
+      }
+
+      async function unlock() {
+        const token = api_key.value.trim();
+
+        if (!token) {
+          set_token_status('Token required.', 'error');
+          return;
+        }
+
+        token_submit.disabled = true;
+        set_token_status('Checking token...', '');
+        const is_authorized = await load_recent_links();
+        token_submit.disabled = false;
+
+        if (!is_authorized) {
+          localStorage.removeItem(storage_key);
+          set_token_status('Token is incorrect.', 'error');
+          return;
+        }
+
+        localStorage.setItem(storage_key, token);
+        token_gate.hidden = true;
+        app_content.hidden = false;
       }
 
       function render_recent_links() {
@@ -1360,13 +1388,9 @@ export function render_admin_ui(): string {
         status_message.dataset.tone = tone;
       }
 
-      function sync_api_key_state(collapse_if_stored) {
-        const has_key = api_key.value.trim() !== '';
-        api_key_state.textContent = has_key ? 'Stored in this browser' : 'Required';
-
-        if (collapse_if_stored) {
-          api_key_details.open = !has_key;
-        }
+      function set_token_status(message, tone) {
+        token_status.textContent = message;
+        token_status.dataset.tone = tone;
       }
 
       function normalize_custom_path(value) {
