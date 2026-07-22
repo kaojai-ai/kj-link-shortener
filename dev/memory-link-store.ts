@@ -37,6 +37,12 @@ export class MemoryLinkStore implements LinkStore {
     return this.links.get(code) ?? null;
   }
 
+  async list_recent_links(limit: number): Promise<ShortLink[]> {
+    return [...this.links.values()]
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
+      .slice(0, limit);
+  }
+
   async update_code(code: string, next_code: string, now: Date): Promise<ShortLink | null> {
     const link = this.links.get(code);
 

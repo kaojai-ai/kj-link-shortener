@@ -3,6 +3,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  ScanCommand,
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
@@ -68,6 +69,25 @@ export class DynamoDbLinkStore implements LinkStore {
     }));
 
     return result.Item ? (result.Item as ShortLink) : null;
+  }
+
+  async list_recent_links(limit: number): Promise<ShortLink[]> {
+    const links: ShortLink[] = [];
+    let exclusive_start_key: Record<string, unknown> | undefined;
+
+    do {
+      const result = await this.client.send(new ScanCommand({
+        TableName: this.table_name,
+        ExclusiveStartKey: exclusive_start_key,
+      }));
+
+      links.push(...(result.Items ?? []).map((item) => item as ShortLink));
+      exclusive_start_key = result.LastEvaluatedKey;
+    } while (exclusive_start_key);
+
+    return links
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
+      .slice(0, limit);
   }
 
   async update_code(code: string, next_code: string, now: Date): Promise<ShortLink | null> {

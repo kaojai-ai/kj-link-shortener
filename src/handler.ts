@@ -10,7 +10,13 @@ import {
 } from './analytics.js';
 import { render_admin_ui } from './admin-ui.js';
 import { load_runtime_config } from './config.js';
-import { create_short_link, fetch_metadata_safely, type CreateLinkRequest } from './create-link.js';
+import {
+  create_short_link,
+  fetch_metadata_safely,
+  parse_link_expiry,
+  to_link_expiry_update,
+  type CreateLinkRequest,
+} from './create-link.js';
 import { DynamoDbLinkStore } from './dynamodb-link-store.js';
 import { html_response, json_response, not_found_response, redirect_response } from './http.js';
 import { DuplicateCodeError, is_link_active, type LinkStore } from './link-store.js';
@@ -117,6 +123,11 @@ async function handle_api_request(
     return link_api_response(event, 201, result.link);
   }
 
+  if (method === 'GET' && path === '/api/links') {
+    const links = await link_store.list_recent_links(20);
+    return json_response(200, { links: links.map((link) => link_api_body(event, link)) });
+  }
+
   const link_path_match = path.match(/^\/api\/links\/([^/]+)$/);
 
   if (link_path_match && method === 'GET') {
@@ -141,6 +152,7 @@ async function handle_api_request(
       decodeURIComponent(link_path_match[1] ?? ''),
       parsed_body.body,
       new Date(),
+      default_ttl_days,
       metadata_fetcher,
     );
 
@@ -237,6 +249,7 @@ async function update_link_url(
   code: string,
   body: unknown,
   now: Date,
+  default_ttl_days: number,
   metadata_fetcher: MetadataFetcher,
 ): Promise<
   | { ok: true; link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>> }
@@ -252,6 +265,17 @@ async function update_link_url(
     return { ok: false, status_code: 404, message: 'Not found' };
   }
 
+  const has_expiry_update = Object.hasOwn(body, 'permanent') || Object.hasOwn(body, 'ttl_days') || Object.hasOwn(body, 'expires_at');
+  const expiry_result = has_expiry_update
+    ? parse_link_expiry(body as CreateLinkRequest, default_ttl_days, now)
+    : undefined;
+
+  if (expiry_result && !expiry_result.ok) {
+    return expiry_result;
+  }
+
+  const expiry = expiry_result?.ok ? to_link_expiry_update(expiry_result.expiry) : undefined;
+
   if (Object.hasOwn(body, 'url')) {
     if (typeof body.url !== 'string') {
       return { ok: false, status_code: 400, message: 'url must be a string' };
@@ -265,7 +289,15 @@ async function update_link_url(
     }
 
     const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
-    link = await link_store.update_url(link.code, destination_url, metadata, now);
+    link = await link_store.update_url(link.code, destination_url, metadata, now, expiry);
+
+    if (!link) {
+      return { ok: false, status_code: 404, message: 'Not found' };
+    }
+  }
+
+  if (!Object.hasOwn(body, 'url') && expiry) {
+    link = await link_store.update_url(link.code, link.destination_url, link.metadata, now, expiry);
 
     if (!link) {
       return { ok: false, status_code: 404, message: 'Not found' };
@@ -303,15 +335,24 @@ function link_api_response(
   status_code: number,
   link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>>,
 ): APIGatewayProxyStructuredResultV2 {
-  return json_response(status_code, {
+  return json_response(status_code, link_api_body(event, link));
+}
+
+function link_api_body(
+  event: APIGatewayProxyEventV2,
+  link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>>,
+) {
+  return {
     code: link.code,
     url: link.destination_url,
     destination_url: link.destination_url,
     short_url: build_short_url(event, link.code),
+    created_at: link.created_at,
+    updated_at: link.updated_at,
     expires_at: link.expires_at ?? null,
     permanent: link.is_permanent,
     metadata: link.metadata ?? null,
-  });
+  };
 }
 
 function is_record(value: unknown): value is Record<string, unknown> {

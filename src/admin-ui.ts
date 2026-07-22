@@ -398,6 +398,81 @@ export function render_admin_ui(): string {
         padding: 1.9rem;
       }
 
+      .recent-panel {
+        margin-top: 1.35rem;
+        padding: 1.45rem;
+      }
+
+      .recent-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .recent-heading h2 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
+      .recent-heading p {
+        margin: 0;
+        color: var(--muted);
+        font-size: .9rem;
+      }
+
+      .table-scroll { overflow-x: auto; }
+
+      .recent-table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+
+      .recent-table th,
+      .recent-table td {
+        border-top: 1px solid var(--line);
+        padding: .85rem .75rem;
+        vertical-align: middle;
+      }
+
+      .recent-table th {
+        color: var(--muted);
+        font-size: .76rem;
+        font-weight: 760;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      .recent-table td { font-size: .9rem; }
+
+      .recent-url,
+      .recent-destination {
+        display: block;
+        max-width: 31rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .recent-url { color: var(--accent-strong); font-weight: 700; }
+      .recent-destination { color: var(--muted); }
+      .recent-empty { color: var(--muted); text-align: center; }
+
+      .edit-button {
+        min-height: 2.5rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        padding: 0 .8rem;
+        color: var(--accent-strong);
+        background: #fff;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .edit-button:hover { border-color: var(--accent-line); background: var(--panel-soft); }
+
       .empty-state,
       .confirmed-state {
         min-width: 0;
@@ -736,7 +811,8 @@ export function render_admin_ui(): string {
         }
 
         .creator-panel,
-        .result-panel {
+        .result-panel,
+        .recent-panel {
           padding: 1rem;
         }
 
@@ -940,6 +1016,21 @@ export function render_admin_ui(): string {
           </div>
         </section>
       </div>
+
+      <section class="panel recent-panel" aria-label="Recent short links">
+        <div class="recent-heading">
+          <h2>Last 20 generated URLs</h2>
+          <p>Choose a link to edit it in the form above.</p>
+        </div>
+        <div class="table-scroll">
+          <table class="recent-table">
+            <thead>
+              <tr><th>Short URL</th><th>Destination</th><th>Created</th><th><span class="sr-only">Edit</span></th></tr>
+            </thead>
+            <tbody id="recent-links-body"><tr><td class="recent-empty" colspan="4">Enter your API key to load recent links.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -964,11 +1055,14 @@ export function render_admin_ui(): string {
       const details_panel = document.querySelector('#details-panel');
       const metadata_grid = document.querySelector('#metadata-grid');
       const raw_output = document.querySelector('#raw-output');
+      const recent_links_body = document.querySelector('#recent-links-body');
       const storage_key = 'kj-link-shortener.api-key';
       const ttl_days = 30;
       let last_short_url = '';
       let current_code = '';
       let last_qr_svg = '';
+      let editing_code = '';
+      let recent_links = [];
 
       if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
         const events = new EventSource('/__dev/events');
@@ -982,14 +1076,26 @@ export function render_admin_ui(): string {
       path_prefix.textContent = location.origin + '/';
       api_key.value = localStorage.getItem(storage_key) || '';
       sync_api_key_state(true);
+      if (api_key.value.trim()) void load_recent_links();
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        await create_link();
+        await submit_link();
       });
 
       api_key.addEventListener('input', () => {
         sync_api_key_state(false);
+      });
+
+      api_key.addEventListener('change', () => {
+        void load_recent_links();
+      });
+
+      destination_url.addEventListener('input', () => {
+        const existing_link = recent_links.find((link) => link.destination_url === destination_url.value.trim());
+        if (existing_link && existing_link.code !== editing_code) {
+          select_link_for_edit(existing_link);
+        }
       });
 
       custom_path.addEventListener('blur', () => {
@@ -1019,7 +1125,7 @@ export function render_admin_ui(): string {
         URL.revokeObjectURL(link.href);
       });
 
-      async function create_link() {
+      async function submit_link() {
         const payload = { url: destination_url.value.trim() };
         const path = normalize_custom_path(custom_path.value);
 
@@ -1034,8 +1140,8 @@ export function render_admin_ui(): string {
           payload.ttl_days = ttl_days;
         }
 
-        await request_api('/api/links', {
-          method: 'POST',
+        await request_api(editing_code ? '/api/links/' + encodeURIComponent(editing_code) : '/api/links', {
+          method: editing_code ? 'PATCH' : 'POST',
           body: JSON.stringify(payload),
         });
       }
@@ -1044,7 +1150,7 @@ export function render_admin_ui(): string {
         localStorage.setItem(storage_key, api_key.value);
         sync_api_key_state(true);
         set_busy(true);
-        set_status('Creating short link...', '');
+        set_status(editing_code ? 'Saving link...' : 'Creating short link...', '');
 
         try {
           const response = await fetch(path, {
@@ -1062,7 +1168,8 @@ export function render_admin_ui(): string {
           }
 
           update_result(body);
-          set_status('Short link confirmed.', 'success');
+          set_status(editing_code ? 'Short link updated.' : 'Short link confirmed.', 'success');
+          await load_recent_links();
         } catch (error) {
           show_error(error instanceof Error ? error.message : 'Request failed');
         } finally {
@@ -1114,6 +1221,93 @@ export function render_admin_ui(): string {
 
         render_qr(last_short_url);
         render_details(body);
+      }
+
+      async function load_recent_links() {
+        if (!api_key.value.trim()) return;
+
+        try {
+          const response = await fetch('/api/links', {
+            headers: { 'x-api-key': api_key.value },
+          });
+          const body = await parse_response(response);
+
+          if (!response.ok) {
+            recent_links_body.replaceChildren(recent_empty_row(body.error || 'Recent links could not be loaded.'));
+            return;
+          }
+
+          recent_links = Array.isArray(body.links) ? body.links : [];
+          render_recent_links();
+        } catch {
+          recent_links_body.replaceChildren(recent_empty_row('Recent links could not be loaded.'));
+        }
+      }
+
+      function render_recent_links() {
+        recent_links_body.replaceChildren();
+
+        if (recent_links.length === 0) {
+          recent_links_body.append(recent_empty_row('No generated links yet.'));
+          return;
+        }
+
+        for (const link_data of recent_links) {
+          const row = document.createElement('tr');
+          const short_url_cell = document.createElement('td');
+          const short_url = document.createElement('a');
+          short_url.className = 'recent-url';
+          short_url.href = link_data.short_url;
+          short_url.target = '_blank';
+          short_url.rel = 'noopener noreferrer';
+          short_url.textContent = link_data.short_url;
+          short_url_cell.append(short_url);
+
+          const destination_cell = document.createElement('td');
+          const destination = document.createElement('span');
+          destination.className = 'recent-destination';
+          destination.title = link_data.destination_url;
+          destination.textContent = link_data.destination_url;
+          destination_cell.append(destination);
+
+          const created_cell = document.createElement('td');
+          created_cell.textContent = format_datetime(link_data.created_at);
+
+          const edit_cell = document.createElement('td');
+          const edit_button = document.createElement('button');
+          edit_button.className = 'edit-button';
+          edit_button.type = 'button';
+          edit_button.textContent = 'Edit';
+          edit_button.addEventListener('click', () => select_link_for_edit(link_data));
+          edit_cell.append(edit_button);
+
+          row.append(short_url_cell, destination_cell, created_cell, edit_cell);
+          recent_links_body.append(row);
+        }
+      }
+
+      function recent_empty_row(message) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.className = 'recent-empty';
+        cell.colSpan = 4;
+        cell.textContent = message;
+        row.append(cell);
+        return row;
+      }
+
+      function select_link_for_edit(link_data) {
+        editing_code = link_data.code;
+        current_code = link_data.code;
+        destination_url.value = link_data.destination_url;
+        custom_path.value = link_data.code;
+        lifetime_permanent.checked = Boolean(link_data.permanent);
+        lifetime_ttl.checked = !link_data.permanent;
+        submit_button.lastChild.textContent = ' Save changes';
+        submit_button.setAttribute('aria-label', 'Save changes to ' + link_data.code);
+        set_status('Editing ' + link_data.short_url, '');
+        update_result(link_data);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
       function render_details(body) {
