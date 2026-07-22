@@ -148,7 +148,7 @@ describe('handler', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
-    expect(response.body).toContain('Enter API token');
+    expect(response.body).toContain('placeholder="API token"');
   });
 
   it('allows all crawlers through robots.txt', async () => {
