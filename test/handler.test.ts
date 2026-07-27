@@ -444,6 +444,10 @@ describe('handler', () => {
     expect(response.headers?.['content-type']).toBe('text/html; charset=utf-8');
     expect(response.body).toContain('<meta property="og:title" content="Example &lt;Docs&gt;">');
     expect(response.body).toContain('<meta property="og:image" content="https://example.org/og.png">');
+    expect(response.body).toContain('<meta http-equiv="refresh" content="0;url=https://example.org/docs">');
+    expect(response.body).toContain('<img class="loading" src="https://imgsv.kaojai.ai/resources/web/kj-expression/loading-transparent.gif" alt="Loading">');
+    expect(response.body).toContain('<p class="status">Redirecting…</p>');
+    expect(response.body).toContain('<a class="destination" href="https://example.org/docs">https://example.org/docs</a>');
     expect(link?.visit_count).toBe(0);
   });
 
