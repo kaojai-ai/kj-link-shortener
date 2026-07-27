@@ -45,7 +45,7 @@ export function render_preview_html(link: ShortLink, short_url: string): string 
     `<meta http-equiv="refresh" content="0;url=${escape_html_attribute(link.destination_url)}">`,
     '<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#9ca3af;font:400 13px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(28rem,calc(100vw - 3rem));text-align:center}.loading{display:block;width:4rem;height:4rem;margin:0 auto 1rem}.status{margin:0 0 .35rem}.destination{color:inherit;overflow-wrap:anywhere;word-break:break-word}</style>',
     '</head>',
-    `<body><main><img class="loading" src="https://imgsv.kaojai.ai/resources/web/kj-expression/loading-transparent.gif" alt="Loading"><p class="status">Redirecting…</p><a class="destination" href="${escape_html_attribute(link.destination_url)}">${escape_html_text(link.destination_url)}</a></main>`,
+    `<body><main><p class="status">Redirecting…</p><a class="destination" href="${escape_html_attribute(link.destination_url)}">${escape_html_text(link.destination_url)}</a></main>`,
     '</body>',
     '</html>',
   ].filter(Boolean).join('');
