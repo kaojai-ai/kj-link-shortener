@@ -202,6 +202,41 @@ export class DynamoDbLinkStore implements LinkStore {
     }
   }
 
+  async update_metadata(code: string, metadata: LinkMetadata | undefined, now: Date): Promise<ShortLink | null> {
+    const expression_attribute_values: Record<string, unknown> = {
+      ':updated_at': now.toISOString(),
+    };
+
+    if (metadata) {
+      expression_attribute_values[':metadata'] = metadata;
+    }
+
+    try {
+      const result = await this.client.send(new UpdateCommand({
+        TableName: this.table_name,
+        Key: { code },
+        UpdateExpression: metadata
+          ? 'set #metadata = :metadata, updated_at = :updated_at'
+          : 'set updated_at = :updated_at remove #metadata',
+        ConditionExpression: 'attribute_exists(#code)',
+        ExpressionAttributeNames: {
+          '#code': 'code',
+          '#metadata': 'metadata',
+        },
+        ExpressionAttributeValues: expression_attribute_values,
+        ReturnValues: 'ALL_NEW',
+      }));
+
+      return result.Attributes ? (result.Attributes as ShortLink) : null;
+    } catch (error) {
+      if (is_conditional_check_failed(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
   async disable_link(code: string, now: Date): Promise<boolean> {
     try {
       await this.client.send(new UpdateCommand({

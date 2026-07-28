@@ -108,6 +108,31 @@ export class MemoryLinkStore implements LinkStore {
     return updated_link;
   }
 
+  async update_metadata(
+    code: string,
+    metadata: LinkMetadata | undefined,
+    now: Date,
+  ): Promise<ShortLink | null> {
+    const link = this.links.get(code);
+
+    if (!link) {
+      return null;
+    }
+
+    const updated_link: ShortLink = {
+      ...link,
+      updated_at: now.toISOString(),
+      ...(metadata ? { metadata } : {}),
+    };
+
+    if (!metadata) {
+      delete updated_link.metadata;
+    }
+
+    this.links.set(code, updated_link);
+    return updated_link;
+  }
+
   async disable_link(code: string, now: Date): Promise<boolean> {
     const link = this.links.get(code);
 

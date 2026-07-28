@@ -77,6 +77,23 @@ curl -X PATCH "https://example.com/api/links/docs" \
   -d '{"url":"https://example.org/new-docs"}'
 ```
 
+Override social preview metadata without changing the destination URL:
+
+```bash
+curl -X PATCH "https://example.com/api/links/docs" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $SHORTENER_API_KEY" \
+  -d '{
+    "metadata":{
+      "title":"Custom preview title",
+      "description":"Custom preview description",
+      "image":"https://example.org/custom-preview.png"
+    }
+  }'
+```
+
+Send `{"metadata":null}` to re-fetch metadata from the current destination.
+
 Redirect:
 
 ```bash
@@ -115,6 +132,7 @@ The create response includes the generated short URL and stored preview metadata
 - Link creation validates the URL string but does not require the destination to be fetchable.
 - Metadata fetch is best-effort and bounded; if it fails or finds nothing, the link is still created with `metadata: null`.
 - `PATCH /api/links/{code}` updates the destination URL and refreshes metadata best-effort.
+- Patch requests can override `metadata.title`, `metadata.description`, and `metadata.image` without changing the destination.
 - Metadata fetches block private/local network destinations.
 - Social crawler user agents receive a small HTML preview page with stored Open Graph/Twitter tags.
 - Preview pages use the configured custom domain as their canonical and `og:url`.
