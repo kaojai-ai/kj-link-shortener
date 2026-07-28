@@ -19,7 +19,7 @@ import {
 } from './create-link.js';
 import { DynamoDbLinkStore } from './dynamodb-link-store.js';
 import { html_response, json_response, not_found_response, redirect_response } from './http.js';
-import { DuplicateCodeError, is_link_active, type LinkStore } from './link-store.js';
+import { DuplicateCodeError, is_link_active, type LinkMetadata, type LinkStore } from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import { is_preview_crawler, render_preview_html } from './preview-html.js';
 import { is_reserved_code, normalize_custom_code, validate_custom_code } from './short-code.js';
@@ -245,14 +245,25 @@ async function update_link_url(
   | { ok: true; link: NonNullable<Awaited<ReturnType<LinkStore['get_link']>>> }
   | { ok: false; status_code: 400 | 404 | 409; message: string }
 > {
-  if (!is_record(body) || (!Object.hasOwn(body, 'url') && !Object.hasOwn(body, 'code'))) {
-    return { ok: false, status_code: 400, message: 'url or code is required' };
+  if (
+    !is_record(body) ||
+    (!Object.hasOwn(body, 'url') && !Object.hasOwn(body, 'code') && !Object.hasOwn(body, 'metadata'))
+  ) {
+    return { ok: false, status_code: 400, message: 'url, code, or metadata is required' };
   }
 
   let link = await link_store.get_link(code);
 
   if (!link) {
     return { ok: false, status_code: 404, message: 'Not found' };
+  }
+
+  const metadata_update = Object.hasOwn(body, 'metadata')
+    ? parse_metadata_update(body.metadata, now)
+    : undefined;
+
+  if (metadata_update && !metadata_update.ok) {
+    return metadata_update;
   }
 
   const has_expiry_update = Object.hasOwn(body, 'permanent') || Object.hasOwn(body, 'ttl_days') || Object.hasOwn(body, 'expires_at');
@@ -278,7 +289,9 @@ async function update_link_url(
       return { ok: false, status_code: 400, message: url_error };
     }
 
-    const metadata = await fetch_metadata_safely(metadata_fetcher, destination_url, now);
+    const metadata = metadata_update?.ok && metadata_update.mode === 'manual'
+      ? metadata_update.metadata
+      : await fetch_metadata_safely(metadata_fetcher, destination_url, now);
     link = await link_store.update_url(link.code, destination_url, metadata, now, expiry);
 
     if (!link) {
@@ -288,6 +301,17 @@ async function update_link_url(
 
   if (!Object.hasOwn(body, 'url') && expiry) {
     link = await link_store.update_url(link.code, link.destination_url, link.metadata, now, expiry);
+
+    if (!link) {
+      return { ok: false, status_code: 404, message: 'Not found' };
+    }
+  }
+
+  if (!Object.hasOwn(body, 'url') && metadata_update?.ok) {
+    const metadata = metadata_update.mode === 'manual'
+      ? metadata_update.metadata
+      : await fetch_metadata_safely(metadata_fetcher, link.destination_url, now);
+    link = await link_store.update_metadata(link.code, metadata, now);
 
     if (!link) {
       return { ok: false, status_code: 404, message: 'Not found' };
@@ -347,6 +371,88 @@ function link_api_body(
 
 function is_record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parse_metadata_update(
+  value: unknown,
+  now: Date,
+):
+  | { ok: true; mode: 'refresh' }
+  | { ok: true; mode: 'manual'; metadata: LinkMetadata }
+  | { ok: false; status_code: 400; message: string } {
+  if (value === null) {
+    return { ok: true, mode: 'refresh' };
+  }
+
+  if (!is_record(value)) {
+    return { ok: false, status_code: 400, message: 'metadata must be an object or null' };
+  }
+
+  const title = parse_optional_metadata_text(value.title, 'metadata.title', 300);
+  if (!title.ok) return title;
+
+  const description = parse_optional_metadata_text(value.description, 'metadata.description', 2_000);
+  if (!description.ok) return description;
+
+  const image = parse_optional_metadata_text(value.image, 'metadata.image', 2_048);
+  if (!image.ok) return image;
+
+  let normalized_image: string | undefined;
+
+  if (image.value) {
+    try {
+      const image_url = new URL(image.value);
+
+      if (
+        (image_url.protocol !== 'http:' && image_url.protocol !== 'https:') ||
+        image_url.username ||
+        image_url.password
+      ) {
+        return { ok: false, status_code: 400, message: 'metadata.image must be an HTTP(S) URL without credentials' };
+      }
+
+      normalized_image = image_url.toString();
+    } catch {
+      return { ok: false, status_code: 400, message: 'metadata.image must be a valid URL' };
+    }
+  }
+
+  if (!title.value && !description.value && !normalized_image) {
+    return { ok: false, status_code: 400, message: 'metadata must include title, description, or image' };
+  }
+
+  return {
+    ok: true,
+    mode: 'manual',
+    metadata: {
+      ...(title.value ? { title: title.value } : {}),
+      ...(description.value ? { description: description.value } : {}),
+      ...(normalized_image ? { image: normalized_image } : {}),
+      fetched_at: now.toISOString(),
+    },
+  };
+}
+
+function parse_optional_metadata_text(
+  value: unknown,
+  field: string,
+  max_length: number,
+): { ok: true; value?: string } | { ok: false; status_code: 400; message: string } {
+  if (value === undefined || value === null || value === '') {
+    return { ok: true };
+  }
+
+  if (typeof value !== 'string') {
+    return { ok: false, status_code: 400, message: `${field} must be a string` };
+  }
+
+  const normalized_value = value.trim();
+
+  if (normalized_value.length > max_length) {
+    return { ok: false, status_code: 400, message: `${field} must be ${max_length} characters or fewer` };
+  }
+
+  return normalized_value ? { ok: true, value: normalized_value } : { ok: true };
 }
 
 function parse_json_body(body: string | undefined): { ok: true; body: unknown } | { ok: false; message: string } {

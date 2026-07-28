@@ -61,6 +61,7 @@ export interface LinkStore {
     now: Date,
     expiry?: LinkExpiryUpdate,
   ): Promise<ShortLink | null>;
+  update_metadata(code: string, metadata: LinkMetadata | undefined, now: Date): Promise<ShortLink | null>;
   disable_link(code: string, now: Date): Promise<boolean>;
   record_visit(code: string, now: Date): Promise<void>;
 }

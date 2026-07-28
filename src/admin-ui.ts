@@ -200,6 +200,26 @@ export function render_admin_ui(): string {
 
       .custom-path-input { padding: 0 1rem; }
 
+      .metadata-editor {
+        display: grid;
+        gap: .9rem;
+        border-top: 1px solid var(--line);
+        padding-top: 1.2rem;
+      }
+
+      .metadata-editor[hidden] { display: none; }
+
+      .metadata-input-shell {
+        grid-template-columns: minmax(0, 1fr);
+        min-height: 3.35rem;
+      }
+
+      .metadata-input-shell input {
+        min-height: 3.25rem;
+        padding: 0 1rem;
+        font-size: .95rem;
+      }
+
       .field-note {
         margin: 0;
         color: var(--muted);
@@ -910,6 +930,29 @@ export function render_admin_ui(): string {
               <p id="custom-path-note" class="field-note">Letters, numbers, hyphens, and underscores. Use only the path.</p>
             </label>
 
+            <fieldset id="metadata-editor" class="metadata-editor" aria-labelledby="metadata-editor-label" hidden>
+              <legend id="metadata-editor-label" class="section-label">Social preview metadata</legend>
+              <label class="field">
+                <span class="field-label">Title <span class="optional">(optional)</span></span>
+                <span class="input-shell metadata-input-shell">
+                  <input id="metadata-title" type="text" autocomplete="off" maxlength="300" placeholder="Preview title">
+                </span>
+              </label>
+              <label class="field">
+                <span class="field-label">Description <span class="optional">(optional)</span></span>
+                <span class="input-shell metadata-input-shell">
+                  <input id="metadata-description" type="text" autocomplete="off" maxlength="2000" placeholder="Preview description">
+                </span>
+              </label>
+              <label class="field">
+                <span class="field-label">Image URL <span class="optional">(optional)</span></span>
+                <span class="input-shell metadata-input-shell">
+                  <input id="metadata-image" type="url" autocomplete="url" maxlength="2048" placeholder="https://example.com/preview.jpg">
+                </span>
+              </label>
+              <p class="field-note">Clear all three fields to re-fetch metadata from the destination.</p>
+            </fieldset>
+
             <fieldset class="field" aria-labelledby="lifetime-label">
               <legend id="lifetime-label" class="section-label">Link lifetime</legend>
               <div class="choice-grid">
@@ -1042,6 +1085,10 @@ export function render_admin_ui(): string {
       const path_prefix = document.querySelector('#path-prefix');
       const lifetime_ttl = document.querySelector('#lifetime-ttl');
       const lifetime_permanent = document.querySelector('#lifetime-permanent');
+      const metadata_editor = document.querySelector('#metadata-editor');
+      const metadata_title = document.querySelector('#metadata-title');
+      const metadata_description = document.querySelector('#metadata-description');
+      const metadata_image = document.querySelector('#metadata-image');
       const api_key = document.querySelector('#api-key');
       const token_submit = document.querySelector('#token-submit');
       const token_status = document.querySelector('#token-status');
@@ -1065,6 +1112,7 @@ export function render_admin_ui(): string {
       let last_qr_svg = '';
       let editing_code = '';
       let recent_links = [];
+      let metadata_is_dirty = false;
 
       if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
         const events = new EventSource('/__dev/events');
@@ -1099,6 +1147,12 @@ export function render_admin_ui(): string {
       custom_path.addEventListener('blur', () => {
         custom_path.value = normalize_custom_path(custom_path.value);
       });
+
+      for (const input of [metadata_title, metadata_description, metadata_image]) {
+        input.addEventListener('input', () => {
+          metadata_is_dirty = true;
+        });
+      }
 
       copy_button.addEventListener('click', async () => {
         if (!last_short_url) return;
@@ -1138,6 +1192,15 @@ export function render_admin_ui(): string {
           payload.ttl_days = ttl_days;
         }
 
+        if (editing_code && metadata_is_dirty) {
+          const metadata = {
+            ...(metadata_title.value.trim() ? { title: metadata_title.value.trim() } : {}),
+            ...(metadata_description.value.trim() ? { description: metadata_description.value.trim() } : {}),
+            ...(metadata_image.value.trim() ? { image: metadata_image.value.trim() } : {}),
+          };
+          payload.metadata = Object.keys(metadata).length > 0 ? metadata : null;
+        }
+
         await request_api(editing_code ? '/api/links/' + encodeURIComponent(editing_code) : '/api/links', {
           method: editing_code ? 'PATCH' : 'POST',
           body: JSON.stringify(payload),
@@ -1164,6 +1227,7 @@ export function render_admin_ui(): string {
           }
 
           update_result(body);
+          metadata_is_dirty = false;
           set_status(editing_code ? 'Short link updated.' : 'Short link confirmed.', 'success');
           await load_recent_links();
         } catch (error) {
@@ -1325,6 +1389,11 @@ export function render_admin_ui(): string {
         custom_path.value = link_data.code;
         lifetime_permanent.checked = Boolean(link_data.permanent);
         lifetime_ttl.checked = !link_data.permanent;
+        metadata_title.value = link_data.metadata?.title || '';
+        metadata_description.value = link_data.metadata?.description || '';
+        metadata_image.value = link_data.metadata?.image || '';
+        metadata_editor.hidden = false;
+        metadata_is_dirty = false;
         submit_button.lastChild.textContent = ' Save changes';
         submit_button.setAttribute('aria-label', 'Save changes to ' + link_data.code);
         set_status('Editing ' + link_data.short_url, '');

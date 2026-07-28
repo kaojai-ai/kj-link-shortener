@@ -99,6 +99,10 @@ describe('handler', () => {
     expect(response.body).toContain('KJ Link Shortener');
     expect(response.body).toContain('/api/links');
     expect(response.body).toContain('id="custom-path"');
+    expect(response.body).toContain('id="metadata-editor"');
+    expect(response.body).toContain('id="metadata-title"');
+    expect(response.body).toContain('id="metadata-description"');
+    expect(response.body).toContain('id="metadata-image"');
     expect(response.body).toContain('Link lifetime');
     expect(response.body).toContain('Download QR');
     expect(response.body).toContain('Last 20 generated URLs');
@@ -528,6 +532,107 @@ describe('handler', () => {
 
     expect(redirect_response.statusCode).toBe(302);
     expect(redirect_response.headers?.location).toBe('https://example.org/new-docs');
+  });
+
+  it('updates preview metadata without changing the destination URL', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata,
+    );
+    const metadata_fetcher = vi.fn(no_metadata);
+
+    const update_response = await handle_request(
+      event({
+        method: 'PATCH',
+        path: '/api/links/docs',
+        api_key: API_KEY,
+        body: {
+          metadata: {
+            title: 'Manual title',
+            description: 'Manual description',
+            image: 'https://example.org/manual.png',
+          },
+        },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata_fetcher,
+    );
+
+    expect(update_response.statusCode).toBe(200);
+    expect(JSON.parse(update_response.body ?? '{}')).toMatchObject({
+      destination_url: 'https://example.org/docs',
+      metadata: {
+        title: 'Manual title',
+        description: 'Manual description',
+        image: 'https://example.org/manual.png',
+        fetched_at: expect.any(String),
+      },
+    });
+    expect(metadata_fetcher).not.toHaveBeenCalled();
+
+    const preview_response = await handle_request(
+      event({ method: 'GET', path: '/docs', user_agent: 'facebookexternalhit/1.1' }),
+      store,
+      API_KEY,
+      30,
+      no_metadata,
+    );
+
+    expect(preview_response.body).toContain('<meta property="og:title" content="Manual title">');
+    expect(preview_response.body).toContain('<meta property="og:image" content="https://example.org/manual.png">');
+  });
+
+  it('re-fetches preview metadata when metadata is null', async () => {
+    const store = new MemoryLinkStore();
+    await handle_request(
+      event({
+        method: 'POST',
+        path: '/api/links',
+        api_key: API_KEY,
+        body: { url: 'https://example.org/docs', code: 'docs' },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata,
+    );
+    const metadata_fetcher = vi.fn(async () => ({
+      title: 'Refreshed title',
+      fetched_at: '2026-05-13T02:00:00.000Z',
+    }));
+
+    const update_response = await handle_request(
+      event({
+        method: 'PATCH',
+        path: '/api/links/docs',
+        api_key: API_KEY,
+        body: { metadata: null },
+      }),
+      store,
+      API_KEY,
+      30,
+      metadata_fetcher,
+    );
+
+    expect(update_response.statusCode).toBe(200);
+    expect(JSON.parse(update_response.body ?? '{}')).toMatchObject({
+      destination_url: 'https://example.org/docs',
+      metadata: {
+        title: 'Refreshed title',
+      },
+    });
+    expect(metadata_fetcher).toHaveBeenCalledWith('https://example.org/docs', expect.any(Date));
   });
 
   it('updates the short code through the private API', async () => {
