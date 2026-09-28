@@ -1,6 +1,6 @@
 export type OwnerContext = {
   tenant_id?: string;
-  source_kind: 'booking_public_link' | 'manual' | 'unknown';
+  source_kind: 'booking_public_link' | 'livecam_public' | 'manual' | 'unknown';
   source_id?: string;
   created_by_user_id?: string;
 };

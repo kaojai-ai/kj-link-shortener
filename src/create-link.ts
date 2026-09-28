@@ -207,6 +207,7 @@ function parse_owner_context(
 
   if (
     owner_context.source_kind !== 'booking_public_link' &&
+    owner_context.source_kind !== 'livecam_public' &&
     owner_context.source_kind !== 'manual' &&
     owner_context.source_kind !== 'unknown'
   ) {
