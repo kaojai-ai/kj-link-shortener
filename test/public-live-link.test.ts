@@ -35,9 +35,12 @@ describe('public live link endpoint', () => {
     expect(first.statusCode).toBe(201);
     expect(first.headers?.['access-control-allow-origin']).toBe('https://kaojai.ai');
     const first_body = JSON.parse(first.body ?? '{}');
-    expect(first_body.short_url).toMatch(/^https:\/\/example.com\/L[A-Za-z0-9]{7}$/);
+    expect(first_body.short_url).toMatch(/^https:\/\/example.com\/live_[A-Za-z0-9]{7}$/);
     expect(JSON.parse(second.body ?? '{}').code).toBe(first_body.code);
-    expect((await store.get_link(first_body.code))?.owner_context?.source_kind).toBe('livecam_public');
+    const stored = await store.get_link(first_body.code);
+    expect(stored?.owner_context?.source_kind).toBe('livecam_public');
+    const ttl_days = (Date.parse(stored?.expires_at ?? '') - Date.parse(stored?.created_at ?? '')) / 86_400_000;
+    expect(ttl_days).toBeCloseTo(30, 3);
   });
 
   it('rejects non LIVE Cam destinations', async () => {
