@@ -6,7 +6,7 @@ import type { MetadataFetcher } from './metadata.js';
 
 export const PUBLIC_LIVE_LINK_PATH = '/api/public/live-links';
 
-const LIVE_LINK_TTL_DAYS = 90;
+const LIVE_LINK_TTL_DAYS = 30;
 const MAX_BODY_LENGTH = 1_024;
 const MAX_URL_LENGTH = 512;
 const DEFAULT_ALLOWED_HOSTS = ['kaojai.ai', 'www.kaojai.ai'];
@@ -65,7 +65,7 @@ export function normalize_live_url(raw: unknown, hosts = allowed_live_hosts()): 
 
 export function live_link_code(normalized_url: string): string {
   const digest = createHash('sha256').update(normalized_url).digest('base64url').replace(/[-_]/g, '');
-  return `L${digest.slice(0, 7)}`;
+  return `live_${digest.slice(0, 7)}`;
 }
 
 export async function create_public_live_link(
