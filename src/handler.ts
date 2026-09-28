@@ -22,6 +22,7 @@ import { html_response, json_response, not_found_response, redirect_response } f
 import { DuplicateCodeError, is_link_active, type LinkMetadata, type LinkStore } from './link-store.js';
 import { fetch_link_metadata, type MetadataFetcher } from './metadata.js';
 import { is_preview_crawler, render_preview_html } from './preview-html.js';
+import { create_public_live_link, PUBLIC_LIVE_LINK_PATH, with_cors } from './public-live-link.js';
 import { is_reserved_code, normalize_custom_code, validate_custom_code } from './short-code.js';
 import { normalize_destination_url, validate_destination_url } from './url.js';
 
@@ -66,6 +67,27 @@ export async function handle_request(
       },
       body: 'User-agent: *\nAllow: /\n',
     };
+  }
+
+  if (path === PUBLIC_LIVE_LINK_PATH) {
+    const origin = get_header(event, 'origin');
+
+    if (method === 'OPTIONS') {
+      return with_cors({ statusCode: 204, headers: { 'cache-control': 'no-store' } }, origin);
+    }
+
+    if (method !== 'POST') {
+      return with_cors(json_response(405, { error: 'Method not allowed' }), origin);
+    }
+
+    const result = await create_public_live_link(link_store, event.body, new Date(), metadata_fetcher);
+
+    return with_cors(
+      result.ok
+        ? json_response(201, { code: result.link.code, short_url: build_short_url(event, result.link.code), expires_at: result.link.expires_at ?? null })
+        : json_response(result.status_code, { error: result.message }),
+      origin,
+    );
   }
 
   if (path.startsWith('/api/')) {
