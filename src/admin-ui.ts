@@ -905,6 +905,15 @@ export function render_admin_ui(): string {
         <section class="panel creator-panel" aria-label="Create short link">
           <form id="link-form" class="form">
             <label class="field">
+              <span class="field-label">Custom path <span class="optional">(optional)</span></span>
+              <span class="input-shell">
+                <span id="path-prefix" class="path-prefix">/</span>
+                <input id="custom-path" class="custom-path-input" type="text" inputmode="latin" autocomplete="off" placeholder="docs-link" maxlength="64" aria-describedby="custom-path-note">
+              </span>
+              <p id="custom-path-note" class="field-note">Letters, numbers, hyphens, and underscores. An existing path opens that link for editing.</p>
+            </label>
+
+            <label class="field">
               <span class="field-label">Original URL</span>
               <span class="input-shell">
                 <span class="input-icon" aria-hidden="true">
@@ -919,15 +928,6 @@ export function render_admin_ui(): string {
                   </svg>
                 </span>
               </span>
-            </label>
-
-            <label class="field">
-              <span class="field-label">Custom path <span class="optional">(optional)</span></span>
-              <span class="input-shell">
-                <span id="path-prefix" class="path-prefix">/</span>
-                <input id="custom-path" class="custom-path-input" type="text" inputmode="latin" autocomplete="off" placeholder="docs-link" maxlength="64" aria-describedby="custom-path-note">
-              </span>
-              <p id="custom-path-note" class="field-note">Letters, numbers, hyphens, and underscores. Use only the path.</p>
             </label>
 
             <fieldset id="metadata-editor" class="metadata-editor" aria-labelledby="metadata-editor-label" hidden>
@@ -1113,6 +1113,9 @@ export function render_admin_ui(): string {
       let editing_code = '';
       let recent_links = [];
       let metadata_is_dirty = false;
+      let path_lookup = Promise.resolve(false);
+      let lookup_serial = 0;
+      let submit_in_flight = false;
 
       if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
         const events = new EventSource('/__dev/events');
@@ -1134,6 +1137,10 @@ export function render_admin_ui(): string {
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        const loaded_existing = document.activeElement === custom_path
+          ? await lookup_custom_path()
+          : await path_lookup;
+        if (loaded_existing) return;
         await submit_link();
       });
 
@@ -1145,7 +1152,12 @@ export function render_admin_ui(): string {
       });
 
       custom_path.addEventListener('blur', () => {
-        custom_path.value = normalize_custom_path(custom_path.value);
+        if (submit_in_flight) {
+          custom_path.value = normalize_custom_path(custom_path.value);
+          return;
+        }
+
+        path_lookup = lookup_custom_path();
       });
 
       for (const input of [metadata_title, metadata_description, metadata_image]) {
@@ -1178,6 +1190,7 @@ export function render_admin_ui(): string {
       });
 
       async function submit_link() {
+        submit_in_flight = true;
         const payload = { url: destination_url.value.trim() };
         const path = normalize_custom_path(custom_path.value);
 
@@ -1201,10 +1214,14 @@ export function render_admin_ui(): string {
           payload.metadata = Object.keys(metadata).length > 0 ? metadata : null;
         }
 
-        await request_api(editing_code ? '/api/links/' + encodeURIComponent(editing_code) : '/api/links', {
-          method: editing_code ? 'PATCH' : 'POST',
-          body: JSON.stringify(payload),
-        });
+        try {
+          await request_api(editing_code ? '/api/links/' + encodeURIComponent(editing_code) : '/api/links', {
+            method: editing_code ? 'PATCH' : 'POST',
+            body: JSON.stringify(payload),
+          });
+        } finally {
+          submit_in_flight = false;
+        }
       }
 
       async function request_api(path, options) {
@@ -1380,6 +1397,56 @@ export function render_admin_ui(): string {
         cell.textContent = message;
         row.append(cell);
         return row;
+      }
+
+      async function lookup_custom_path() {
+        const path = normalize_custom_path(custom_path.value);
+        custom_path.value = path;
+
+        if (!path || path === editing_code || !api_key.value.trim()) {
+          return false;
+        }
+
+        const serial = ++lookup_serial;
+        const cached = recent_links.find((link) => link.code === path);
+
+        if (cached) {
+          select_link_for_edit(cached);
+          return true;
+        }
+
+        set_status('Checking path...', '');
+
+        try {
+          const response = await fetch('/api/links/' + encodeURIComponent(path), {
+            headers: { 'x-api-key': api_key.value },
+          });
+          const body = await parse_response(response);
+
+          if (serial !== lookup_serial || normalize_custom_path(custom_path.value) !== path || path === editing_code) {
+            return false;
+          }
+
+          if (!response.ok || !body || !body.code) {
+            if (status_message.textContent === 'Checking path...') set_status('', '');
+            return false;
+          }
+
+          select_link_for_edit({
+            code: body.code,
+            destination_url: body.destination_url || body.url || '',
+            permanent: Boolean(body.permanent ?? body.is_permanent),
+            metadata: body.metadata || null,
+            short_url: body.short_url || (location.origin + '/' + encodeURIComponent(body.code)),
+            expires_at: body.expires_at ?? null,
+            created_at: body.created_at,
+            updated_at: body.updated_at,
+          });
+          return true;
+        } catch {
+          if (status_message.textContent === 'Checking path...') set_status('', '');
+          return false;
+        }
       }
 
       function select_link_for_edit(link_data) {
