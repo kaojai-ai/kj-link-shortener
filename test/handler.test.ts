@@ -101,6 +101,8 @@ describe('handler', () => {
     expect(response.body).toContain('id="custom-path"');
     expect(response.body?.indexOf('id="custom-path"')).toBeLessThan(response.body?.indexOf('id="destination-url"') ?? -1);
     expect(response.body).toContain('lookup_custom_path');
+    expect(response.body).toContain('path_lookup_state.done');
+    expect(response.body).toContain('editing_code !== code_before_lookup');
     expect(response.body).toContain("fetch('/api/links/' + encodeURIComponent(path)");
     expect(response.body).toContain('id="metadata-editor"');
     expect(response.body).toContain('id="metadata-title"');
