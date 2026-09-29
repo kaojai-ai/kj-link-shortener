@@ -1113,7 +1113,7 @@ export function render_admin_ui(): string {
       let editing_code = '';
       let recent_links = [];
       let metadata_is_dirty = false;
-      let path_lookup = Promise.resolve(false);
+      let path_lookup_state = { done: true, loaded: false, promise: Promise.resolve(false) };
       let lookup_serial = 0;
       let submit_in_flight = false;
 
@@ -1137,10 +1137,13 @@ export function render_admin_ui(): string {
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const loaded_existing = document.activeElement === custom_path
-          ? await lookup_custom_path()
-          : await path_lookup;
-        if (loaded_existing) return;
+        const code_before_lookup = editing_code;
+        if (document.activeElement === custom_path || !path_lookup_state.done) {
+          const loaded_existing = document.activeElement === custom_path
+            ? await lookup_custom_path()
+            : await path_lookup_state.promise;
+          if (loaded_existing && editing_code !== code_before_lookup) return;
+        }
         await submit_link();
       });
 
@@ -1157,7 +1160,7 @@ export function render_admin_ui(): string {
           return;
         }
 
-        path_lookup = lookup_custom_path();
+        void lookup_custom_path();
       });
 
       for (const input of [metadata_title, metadata_description, metadata_image]) {
@@ -1400,6 +1403,21 @@ export function render_admin_ui(): string {
       }
 
       async function lookup_custom_path() {
+        const state = { done: false, loaded: false, promise: null };
+        const promise = (async () => {
+          try {
+            state.loaded = await load_matching_custom_path();
+            return state.loaded;
+          } finally {
+            state.done = true;
+          }
+        })();
+        state.promise = promise;
+        path_lookup_state = state;
+        return promise;
+      }
+
+      async function load_matching_custom_path() {
         const path = normalize_custom_path(custom_path.value);
         custom_path.value = path;
 
